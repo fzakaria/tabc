@@ -14,7 +14,6 @@ import (
 	"time"
 
 	"github.com/coder/websocket"
-	"golang.org/x/sys/unix"
 )
 
 // The guest's network. The page's network stack ends the guest's
@@ -57,11 +56,10 @@ const (
 )
 
 // The resolver configuration's directive for a server, the DNS port,
-// and the loopback device's name.
+// and the networks dialled and looked up on.
 const (
 	directiveNameserver = "nameserver"
 	dnsPort             = "53"
-	loopbackDevice      = "lo"
 	networkTCP4         = "tcp4"
 	networkIP4          = "ip4"
 )
@@ -108,30 +106,6 @@ func resolverFor(resolvConf string) *net.Resolver {
 			return dialer.DialContext(ctx, network, server)
 		},
 	}
-}
-
-// raiseLoopback brings the loopback device up. A network namespace made
-// for the container starts with loopback down, and the browser reaches
-// the supervisor over it.
-func raiseLoopback() error {
-	socket, err := unix.Socket(unix.AF_INET, unix.SOCK_DGRAM|unix.SOCK_CLOEXEC, 0)
-	if err != nil {
-		return err
-	}
-	defer unix.Close(socket)
-
-	request, err := unix.NewIfreq(loopbackDevice)
-	if err != nil {
-		return err
-	}
-	if err := unix.IoctlIfreq(socket, unix.SIOCGIFFLAGS, request); err != nil {
-		return err
-	}
-	if request.Uint16()&unix.IFF_UP != 0 {
-		return nil
-	}
-	request.SetUint16(request.Uint16() | unix.IFF_UP)
-	return unix.IoctlIfreq(socket, unix.SIOCSIFFLAGS, request)
 }
 
 // serveLookup answers a name with its IPv4 addresses, which is all the
