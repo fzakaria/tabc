@@ -23,8 +23,8 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/fzakaria/tabc/internal/bundle"
 	"github.com/fzakaria/tabc/internal/console"
+	"github.com/fzakaria/tabc/internal/plan"
 	"github.com/fzakaria/tabc/internal/rootfs"
 	"github.com/fzakaria/tabc/internal/signals"
 	"github.com/fzakaria/tabc/internal/state"
@@ -138,9 +138,9 @@ func run(options Options, dir string, logger *log.Logger, logFile *os.File) (int
 	if err != nil {
 		return 0, err
 	}
-	loaded, err := bundle.Load(record.Bundle)
+	planned, err := plan.Load(dir)
 	if err != nil {
-		return 0, err
+		return 0, fmt.Errorf("the container's plan: %w", err)
 	}
 
 	// A network namespace made for this container starts with loopback
@@ -149,52 +149,51 @@ func run(options Options, dir string, logger *log.Logger, logFile *os.File) (int
 		logger.Printf("loopback: %v", err)
 	}
 
-	// The program's terminal, if the container has one.
-	wantsTerminal, cols, rows := loaded.Terminal()
+	// The program's input and output: the supervisor's own stdin,
+	// stdout and stderr, which whoever started the container set up, or
+	// a pty whose controlling end goes to the engine.
+	var stdout, stderr io.Writer = os.Stdout, os.Stderr
+	var stdin io.Reader = os.Stdin
 	var terminal *os.File
-	if wantsTerminal {
+	switch planned.Terminal {
+	case plan.TerminalConsole:
 		terminal, err = openTerminal(options.ConsoleSocket)
 		if err != nil {
 			return 0, err
 		}
 		defer terminal.Close()
-	}
-
-	// The program's output: the terminal, or the supervisor's own
-	// stdout and stderr, which the engine set up.
-	var stdout, stderr io.Writer = os.Stdout, os.Stderr
-	var stdin io.Reader = os.Stdin
-	if terminal != nil {
 		stdout, stderr, stdin = terminal, terminal, terminal
+	case plan.TerminalInherit:
+		terminal = os.Stdin
 	}
+	hasTerminal := planned.Terminal != plan.TerminalNone
 
 	// The page's server.
-	files, err := rootfs.Open(loaded.Rootfs)
+	tree, err := openTree(planned)
 	if err != nil {
 		return 0, err
 	}
-	defer files.Close()
+	defer tree.Close()
 	token, err := newToken()
 	if err != nil {
 		return 0, err
 	}
 	conversation := newSession(stdout, stderr, logger.Printf)
-	guestSpec := loaded.GuestSpec(bundle.NetworkOn)
 	pages := &server{
 		token:    token,
 		shareDir: options.ShareDir,
 		config: pageConfig{
-			Terminal:  wantsTerminal,
-			Cols:      orDefault(int(cols), defaultCols),
-			Rows:      orDefault(int(rows), defaultRows),
+			Terminal:  hasTerminal,
+			Cols:      orDefault(planned.Cols, defaultCols),
+			Rows:      orDefault(planned.Rows, defaultRows),
 			Term:      terminalType,
-			MemoryMiB: memoryMiB(loaded.MemoryLimit()),
+			MemoryMiB: memoryMiB(planned.MemoryBytes),
 			Network:   true,
 		},
-		spec:     guestSpec,
-		files:    files,
+		spec:     planned.Spec,
+		files:    rootfs.Handler{Tree: tree},
 		session:  conversation,
-		resolver: resolverFor(loaded.ResolvConf()),
+		resolver: resolverFor(planned.ResolvConf),
 	}
 	listener, err := net.Listen("tcp4", loopbackAddress)
 	if err != nil {
@@ -311,8 +310,8 @@ func run(options Options, dir string, logger *log.Logger, logFile *os.File) (int
 	}
 	logger.Printf("running")
 
-	go pumpInput(stdin, conversation, terminal != nil, logger)
-	if terminal != nil {
+	go pumpInput(stdin, conversation, hasTerminal, logger)
+	if hasTerminal {
 		go watchSize(terminal, conversation)
 	}
 
@@ -364,6 +363,15 @@ func run(options Options, dir string, logger *log.Logger, logFile *os.File) (int
 			return finish(dir, record, logger, ExitFailed), nil
 		}
 	}
+}
+
+// openTree opens the container's root file system: an image's layers,
+// or a directory.
+func openTree(planned plan.Plan) (rootfs.Tree, error) {
+	if len(planned.Layers) > 0 {
+		return rootfs.OpenLayers(planned.Layers)
+	}
+	return rootfs.OpenDir(planned.Rootfs)
 }
 
 // finish records the container as stopped and returns its status.

@@ -11,7 +11,7 @@ import (
 	"testing"
 )
 
-// newTree makes a small root file system on disk: a script, a
+// newTree makes a small root file system in a directory: a script, a
 // directory, a link inside the tree, a link that points out of it, and
 // a secret next to the root that nothing in the root may reach. It
 // returns the server and a function that performs one operation.
@@ -32,9 +32,10 @@ func newTree(t *testing.T) func(op string, params url.Values) *http.Response {
 	must(os.WriteFile(filepath.Join(outside, "secret"), []byte("secret"), 0o600))
 	must(os.Symlink("../secret", filepath.Join(root, "escape")))
 
-	server, err := Open(root)
+	tree, err := OpenDir(root)
 	must(err)
-	t.Cleanup(func() { server.Close() })
+	t.Cleanup(func() { tree.Close() })
+	server := Handler{Tree: tree}
 
 	return func(op string, params url.Values) *http.Response {
 		recorder := httptest.NewRecorder()
@@ -59,17 +60,17 @@ func TestAttr(t *testing.T) {
 
 	var attr Attr
 	decode(t, call(OpAttr, url.Values{"p": {"/"}}), &attr)
-	if attr.Type != typeDir {
+	if attr.Type != TypeDir {
 		t.Errorf("the root is a %q", attr.Type)
 	}
 
 	decode(t, call(OpAttr, url.Values{"p": {"/bin/hello"}}), &attr)
-	if attr.Type != typeFile || attr.Size != 18 || attr.Mode != 0o755 || attr.Ino == 0 {
+	if attr.Type != TypeFile || attr.Size != 18 || attr.Mode != 0o755 || attr.Ino == 0 {
 		t.Errorf("the file: %+v", attr)
 	}
 
 	decode(t, call(OpAttr, url.Values{"p": {"/bin/alias"}}), &attr)
-	if attr.Type != typeSymlink {
+	if attr.Type != TypeSymlink {
 		t.Errorf("the link is a %q", attr.Type)
 	}
 
@@ -91,7 +92,7 @@ func TestDirAndLink(t *testing.T) {
 	for _, entry := range entries {
 		kinds[entry.Name] = entry.Type
 	}
-	if len(kinds) != 2 || kinds["hello"] != typeFile || kinds["alias"] != typeSymlink {
+	if len(kinds) != 2 || kinds["hello"] != TypeFile || kinds["alias"] != TypeSymlink {
 		t.Errorf("the listing: %v", kinds)
 	}
 
@@ -148,7 +149,7 @@ func TestEscape(t *testing.T) {
 	// The link itself is still a link the guest may see.
 	var attr Attr
 	decode(t, call(OpAttr, url.Values{"p": {"/escape"}}), &attr)
-	if attr.Type != typeSymlink {
+	if attr.Type != TypeSymlink {
 		t.Errorf("the escaping link is a %q", attr.Type)
 	}
 }

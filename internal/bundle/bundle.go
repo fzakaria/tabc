@@ -13,6 +13,7 @@ import (
 	specs "github.com/opencontainers/runtime-spec/specs-go"
 
 	"github.com/fzakaria/tabc/internal/guest"
+	"github.com/fzakaria/tabc/internal/plan"
 )
 
 // configFile is the bundle's configuration, and defaultRootfs where the
@@ -242,4 +243,24 @@ func (b *Bundle) NetworkNamespace() (path string, wanted bool) {
 // guest's lookups.
 func (b *Bundle) ResolvConf() string {
 	return b.boundFiles()[resolvPath]
+}
+
+// Plan returns the container as the supervisor runs it. An engine that
+// asks for a terminal hands over a console socket for it.
+func (b *Bundle) Plan() plan.Plan {
+	terminal := plan.TerminalNone
+	wanted, cols, rows := b.Terminal()
+	if wanted {
+		terminal = plan.TerminalConsole
+	}
+
+	return plan.Plan{
+		Spec:        b.GuestSpec(NetworkOn),
+		Terminal:    terminal,
+		Cols:        int(cols),
+		Rows:        int(rows),
+		MemoryBytes: b.MemoryLimit(),
+		Rootfs:      b.Rootfs,
+		ResolvConf:  b.ResolvConf(),
+	}
 }
