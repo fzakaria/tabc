@@ -40,6 +40,10 @@ const pidFileMode = 0o644
 // of its own.
 const defaultHookTimeout = 30 * time.Second
 
+// logTailLines is how much of a supervisor's log a failed create
+// repeats.
+const logTailLines = 15
+
 // deleteWait is how long delete waits for a killed supervisor to go,
 // and deletePoll how often it looks.
 const (
@@ -124,10 +128,16 @@ func spawn(inv cli.Invocation) (*exec.Cmd, string, error) {
 		return nil, "", err
 	}
 
-	// From here on a failure leaves nothing behind.
+	// From here on a failure leaves nothing behind, so what the browser
+	// said on its way down goes into the error: the log is about to be
+	// removed with the rest.
 	process, err := startSupervisor(inv, root, id, dir, loaded, &record)
 	if err != nil {
+		tail := logTail(filepath.Join(dir, state.LogFile))
 		state.Remove(root, id)
+		if tail != "" {
+			err = fmt.Errorf("%w\n%s", err, tail)
+		}
 		return nil, "", err
 	}
 
@@ -140,6 +150,20 @@ func spawn(inv cli.Invocation) (*exec.Cmd, string, error) {
 		}
 	}
 	return process, dir, nil
+}
+
+// logTail returns the last lines of a supervisor's log, or "" when
+// there is no log.
+func logTail(path string) string {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return ""
+	}
+	lines := strings.Split(strings.TrimSpace(string(data)), "\n")
+	if len(lines) > logTailLines {
+		lines = lines[len(lines)-logTailLines:]
+	}
+	return strings.Join(lines, "\n")
 }
 
 // startSupervisor starts the supervisor in the container's network

@@ -239,8 +239,19 @@ func run(options Options, dir string, logger *log.Logger, logFile *os.File) (int
 		}
 	})
 
-	// The browser.
-	browser, err := startBrowser(options.Chromium, dir, pages.pageURL(listener),
+	// The browser, with a profile that goes when the container does.
+	// The profile is in the record too, so a delete of a container whose
+	// supervisor was killed still removes it.
+	profile, err := makeProfile(dir)
+	if err != nil {
+		return 0, err
+	}
+	defer os.RemoveAll(profile)
+	record.Profile = profile
+	if err := state.Save(dir, record); err != nil {
+		return 0, err
+	}
+	browser, err := startBrowser(options.Chromium, profile, pages.pageURL(listener),
 		strings.Fields(os.Getenv(envBrowserFlags)), logFile)
 	if err != nil {
 		return 0, err

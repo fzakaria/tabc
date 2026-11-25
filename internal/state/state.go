@@ -41,9 +41,13 @@ const (
 // defaultRoot is the root for the superuser, and rootDirName the
 // directory under the user's runtime directory for anyone else.
 const (
-	defaultRoot = "/run/tabc"
-	rootDirName = "tabc"
+	systemRunDir = "/run"
+	defaultRoot  = systemRunDir + "/tabc"
+	rootDirName  = "tabc"
 )
+
+// accessWrite asks access(2) whether a path may be written (W_OK).
+const accessWrite = 2
 
 // The permissions of a container's directory and of its state file.
 const (
@@ -59,16 +63,24 @@ type Container struct {
 	Status      Status            `json:"status"`
 	Created     time.Time         `json:"created"`
 	Annotations map[string]string `json:"annotations,omitempty"`
+
+	// Profile is the browser's profile directory, which may be outside
+	// the container's directory (internal/supervisor, makeProfile).
+	Profile string `json:"profile,omitempty"`
 }
 
 // Root returns the directory state is kept under: the one given, else
 // /run/tabc for the superuser and a directory under XDG_RUNTIME_DIR, or
 // the temporary directory, for anyone else.
+//
+// A rootless engine runs the runtime as the superuser of a user
+// namespace, who cannot write to /run. That superuser is anyone else:
+// what decides is whether /run can be written, not the user's number.
 func Root(given string) string {
 	if given != "" {
 		return given
 	}
-	if os.Geteuid() == 0 {
+	if os.Geteuid() == 0 && syscall.Access(systemRunDir, accessWrite) == nil {
 		return defaultRoot
 	}
 	if runtimeDir := os.Getenv("XDG_RUNTIME_DIR"); runtimeDir != "" {
@@ -139,8 +151,12 @@ func Load(root, id string) (Container, error) {
 	return c, nil
 }
 
-// Remove deletes a container's directory.
+// Remove deletes a container's directory, and the browser's profile if
+// the record names one elsewhere.
 func Remove(root, id string) error {
+	if record, err := Load(root, id); err == nil && record.Profile != "" {
+		os.RemoveAll(record.Profile)
+	}
 	return os.RemoveAll(Dir(root, id))
 }
 

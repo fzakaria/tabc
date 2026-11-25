@@ -15,11 +15,20 @@ import (
 // sandbox.
 const unprivilegedID = 65534
 
-// profileDirName is the browser's profile, one per container, under
-// the container's state directory. A profile of its own means a
-// browser process tree of its own: no two containers share a renderer
+// The browser's profile, one per container. A profile of its own means
+// a browser process tree of its own: no two containers share a renderer
 // or any storage.
-const profileDirName = "profile"
+//
+// The profile lives in the container's state directory, unless the
+// browser runs as nobody. Nobody cannot reach a state directory under a
+// user's private runtime directory, which is where a rootless engine's
+// is, so then the profile is a directory of its own under sharedTemp,
+// which anyone can walk into, and the pattern names it.
+const (
+	profileDirName = "profile"
+	sharedTemp     = "/tmp"
+	profilePattern = "tabc-profile-"
+)
 
 // profileMode lets only the browser's user into the profile.
 const profileMode = 0o700
@@ -47,15 +56,29 @@ var chromiumFlags = []string{
 	"--disable-backgrounding-occluded-windows",
 }
 
-// startBrowser launches Chromium on the page at url, with its profile
-// under dir and its own output in log. extraFlags come after tabc's
-// own, so they can override them.
-func startBrowser(binary, dir, url string, extraFlags []string, log *os.File) (*exec.Cmd, error) {
-	profile := filepath.Join(dir, profileDirName)
-	if err := os.Mkdir(profile, profileMode); err != nil {
-		return nil, err
+// makeProfile makes the browser's profile directory for a container
+// whose state is in dir, owned by the user the browser will run as.
+func makeProfile(dir string) (string, error) {
+	if os.Geteuid() != 0 {
+		profile := filepath.Join(dir, profileDirName)
+		return profile, os.Mkdir(profile, profileMode)
 	}
 
+	profile, err := os.MkdirTemp(sharedTemp, profilePattern)
+	if err != nil {
+		return "", err
+	}
+	if err := os.Chown(profile, unprivilegedID, unprivilegedID); err != nil {
+		os.RemoveAll(profile)
+		return "", fmt.Errorf("handing the profile to the browser's user: %w", err)
+	}
+	return profile, nil
+}
+
+// startBrowser launches Chromium on the page at url, with its profile
+// in profile and its own output in log. extraFlags come after tabc's
+// own, so they can override them.
+func startBrowser(binary, profile, url string, extraFlags []string, log *os.File) (*exec.Cmd, error) {
 	args := append([]string{}, chromiumFlags...)
 	args = append(args, "--user-data-dir="+profile)
 	args = append(args, extraFlags...)
@@ -70,12 +93,8 @@ func startBrowser(binary, dir, url string, extraFlags []string, log *os.File) (*
 		"XDG_CACHE_HOME="+filepath.Join(profile, "cache"),
 	)
 
-	// As the superuser, hand the profile to nobody and run the browser
-	// as nobody.
+	// As the superuser, run the browser as nobody.
 	if os.Geteuid() == 0 {
-		if err := os.Chown(profile, unprivilegedID, unprivilegedID); err != nil {
-			return nil, fmt.Errorf("handing the profile to the browser's user: %w", err)
-		}
 		browser.SysProcAttr = &syscall.SysProcAttr{
 			Credential: &syscall.Credential{Uid: unprivilegedID, Gid: unprivilegedID},
 		}
