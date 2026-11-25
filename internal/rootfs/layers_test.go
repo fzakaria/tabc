@@ -165,6 +165,20 @@ func TestLayersLinks(t *testing.T) {
 		t.Error("a read went through a symbolic link")
 	}
 
+	// A listing carries each entry's attributes and a link's target.
+	entries, err := tree.Dir("/bin")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, entry := range entries {
+		if entry.Name == "sh" && entry.Target != "busybox" {
+			t.Errorf("the link's target in the listing: %q", entry.Target)
+		}
+		if entry.Name == "busybox" && (entry.Attr.Size != 3 || entry.Attr.Mode != 0o755) {
+			t.Errorf("the file's attributes in the listing: %+v", entry.Attr)
+		}
+	}
+
 	original, _ := tree.Attr("/bin/busybox")
 	linked, err := tree.Attr("/bin/ls")
 	if err != nil || linked.Ino != original.Ino || linked.Type != TypeFile {

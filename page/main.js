@@ -26,6 +26,9 @@ const INIT_NAME = "init";
 const SPEC_NAME = "spec.json";
 const EXECUTABLE = 0o755;
 
+// The image's root, as the guest names it.
+const ROOT = "/";
+
 // The image's lookups wait on the supervisor's disk, never on a network,
 // so the SDK's request timeout is off: a slow disk is not an error.
 const NO_TIMEOUT = 0;
@@ -94,6 +97,14 @@ async function fetchJson(url) {
 
 // The container image as the guest's file system. Read-only: the
 // guest's init puts a writable layer over it.
+//
+// An image does not change under a running container, so nothing is
+// asked twice. A directory's listing carries each entry's attributes
+// and each link's target, and every lookup is answered from the
+// listing of the directory the path is in: one request per directory
+// the guest ever looks into, however many names it tries there. A
+// program that searches ten directories for a library asks ten
+// questions, and the nine answers of "not here" cost nothing more.
 function imageFs() {
   const call = async (op, path, extra = "") => {
     const response = await fetch(`${FS_URL}${op}?p=${encodeURIComponent(path)}${extra}`);
@@ -106,23 +117,58 @@ function imageFs() {
     throw new FsError(code);
   };
 
+  // Each directory's entries by name, as a promise so that lookups
+  // arriving together share one request. A failed listing is forgotten,
+  // so the error is the guest's and not the cache's.
+  const listings = new Map();
+  const listing = (path) => {
+    let entries = listings.get(path);
+    if (entries === undefined) {
+      entries = call("dir", path)
+        .then((response) => response.json())
+        .then((list) => new Map(list.map((entry) => [entry.name, entry])));
+      entries.catch(() => listings.delete(path));
+      listings.set(path, entries);
+    }
+    return entries;
+  };
+
+  // The root has no directory to be listed in, so its attributes are
+  // asked for once by name.
+  let rootAttr;
+  const entryOf = async (path) => {
+    if (path === ROOT) {
+      rootAttr ??= call("attr", ROOT).then((response) => response.json());
+      return { attr: await rootAttr };
+    }
+
+    const cut = path.lastIndexOf("/");
+    const entries = await listing(cut === 0 ? ROOT : path.slice(0, cut));
+    const entry = entries.get(path.slice(cut + 1));
+    if (entry === undefined) {
+      throw new FsError("ENOENT");
+    }
+    return entry;
+  };
+
   return {
-    getattr: async (path) => (await call("attr", path)).json(),
-    readdir: async (path) => (await call("dir", path)).json(),
-    readlink: async (path) => (await (await call("link", path)).json()).target,
+    getattr: async (path) => (await entryOf(path)).attr,
+    readdir: async (path) =>
+      [...(await listing(path)).values()].map(({ name, type, ino }) => ({ name, type, ino })),
+    readlink: async (path) => (await entryOf(path)).target,
     open: async (path, flags) => {
       if (flags.write) {
         throw new FsError("EROFS");
       }
 
       // Opening checks the file is there; each read names its range.
-      await call("attr", path);
+      const { attr } = await entryOf(path);
       return {
         read: async (offset, length) =>
           new Uint8Array(
             await (await call("read", path, `&o=${offset}&n=${length}`)).arrayBuffer(),
           ),
-        getattr: async () => (await call("attr", path)).json(),
+        getattr: () => attr,
       };
     },
   };
@@ -381,6 +427,8 @@ async function main() {
   bin.writeFile(`/${INIT_NAME}`, new Uint8Array(init), { mode: EXECUTABLE });
   bin.writeFile(`/${SPEC_NAME}`, spec);
 
+  // The log's timestamps are how a start-up's time is accounted for.
+  tell(ToSupervisor.LOG, { message: "booting the kernel" });
   const vm = await createKernel({
     kernel: new URL("unkernel/unkernel.wasm", location.href).href,
     memoryMiB: config.memoryMiB,

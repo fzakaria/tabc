@@ -79,11 +79,18 @@ type Attr struct {
 	Ino     uint64 `json:"ino"`
 }
 
-// Entry is one name in a directory.
+// Entry is one name in a directory, with everything a lookup of that
+// name would ask next: its attributes, and a symbolic link's target.
+// An image does not change under a running container, so the page
+// keeps each listing and answers the guest's later lookups in that
+// directory, the ones for names that are not there included, without
+// asking again.
 type Entry struct {
-	Name string `json:"name"`
-	Type string `json:"type"`
-	Ino  uint64 `json:"ino"`
+	Name   string `json:"name"`
+	Type   string `json:"type"`
+	Ino    uint64 `json:"ino"`
+	Attr   Attr   `json:"attr"`
+	Target string `json:"target,omitempty"`
 }
 
 // Tree is a root file system. Every path is the container's own:

@@ -296,7 +296,13 @@ func (t *LayerTree) Dir(name string) ([]Entry, error) {
 
 	entries := make([]Entry, 0, len(found.children))
 	for child, item := range found.children {
-		entries = append(entries, Entry{Name: child, Type: item.attr.Type, Ino: item.attr.Ino})
+		entries = append(entries, Entry{
+			Name:   child,
+			Type:   item.attr.Type,
+			Ino:    item.attr.Ino,
+			Attr:   item.attr,
+			Target: item.target,
+		})
 	}
 	return entries, nil
 }

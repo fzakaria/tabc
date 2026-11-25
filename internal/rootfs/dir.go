@@ -5,6 +5,7 @@ import (
 	"io"
 	"io/fs"
 	"os"
+	"path"
 	"strings"
 	"syscall"
 )
@@ -57,8 +58,8 @@ func (t *DirTree) Attr(path string) (Attr, error) {
 }
 
 // Dir returns a directory's entries.
-func (t *DirTree) Dir(path string) ([]Entry, error) {
-	directory, err := t.root.Open(relative(path))
+func (t *DirTree) Dir(name string) ([]Entry, error) {
+	directory, err := t.root.Open(relative(name))
 	if err != nil {
 		return nil, err
 	}
@@ -82,7 +83,11 @@ func (t *DirTree) Dir(path string) ([]Entry, error) {
 		if !known {
 			continue
 		}
-		entries = append(entries, Entry{Name: item.Name(), Type: attr.Type, Ino: attr.Ino})
+		entry := Entry{Name: item.Name(), Type: attr.Type, Ino: attr.Ino, Attr: attr}
+		if attr.Type == TypeSymlink {
+			entry.Target, _ = t.root.Readlink(path.Join(relative(name), item.Name()))
+		}
+		entries = append(entries, entry)
 	}
 	return entries, nil
 }

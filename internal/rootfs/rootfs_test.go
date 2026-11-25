@@ -91,6 +91,14 @@ func TestDirAndLink(t *testing.T) {
 	kinds := map[string]string{}
 	for _, entry := range entries {
 		kinds[entry.Name] = entry.Type
+
+		// Each entry carries what a lookup of the name would ask next.
+		if entry.Name == "hello" && (entry.Attr.Size != 18 || entry.Attr.Mode != 0o755) {
+			t.Errorf("the file's attributes in the listing: %+v", entry.Attr)
+		}
+		if entry.Name == "alias" && entry.Target != "hello" {
+			t.Errorf("the link's target in the listing: %q", entry.Target)
+		}
 	}
 	if len(kinds) != 2 || kinds["hello"] != TypeFile || kinds["alias"] != TypeSymlink {
 		t.Errorf("the listing: %v", kinds)
