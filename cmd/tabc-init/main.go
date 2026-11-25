@@ -1,3 +1,5 @@
+//go:build linux
+
 // tabc-init is the first program the guest runs for a container. The
 // page starts it with the path of a guest.Spec. It builds the
 // container's root from the image, which the page serves read-only,
