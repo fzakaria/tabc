@@ -273,6 +273,16 @@ func startSupervisor(l launch, record *state.Container) (*exec.Cmd, error) {
 	}
 	process.Stdout = os.Stdout
 	process.Stderr = os.Stderr
+
+	// With a console socket the program's input and output are the pty,
+	// and this command's own are the engine's way of reading what
+	// create has to say: containerd's shim waits for them to close
+	// before it goes on, which they never would in a supervisor's
+	// hands. exec.Cmd gives a process the null device for each of the
+	// three left unset.
+	if l.consoleSocket != "" {
+		process.Stdin, process.Stdout, process.Stderr = nil, nil, nil
+	}
 	process.ExtraFiles = []*os.File{readyWrite}
 	process.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 
