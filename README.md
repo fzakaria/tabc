@@ -7,6 +7,8 @@ a Linux process, tabc starts headless Chromium and boots the container
 inside a tab, on a Linux kernel compiled to WebAssembly. The tab is the
 sandbox.
 
+![docker run with the tabc runtime on Linux, then tabc run on a Mac with no VM running](docs/img/demo.webp)
+
 ```console
 $ docker run --rm --runtime tabc --platform linux/arm64 alpine uname -sm
 Linux aarch64
@@ -21,7 +23,8 @@ $ tabc run -it alpine sh
 Linux aarch64
 ```
 
-A container starts in about a second.
+A container starts in under a second: 0.87 s on a Ryzen laptop, 0.44 s
+on an M4.
 
 ## Install
 
@@ -94,8 +97,9 @@ status, its stdio. [docs/design.md](docs/design.md) has the details.
 
 - Images must have a `linux/arm64` variant. The guest is aarch64 on
   every host.
-- Programs run slower than native, since they are emulated. Starting
-  is fast; a long computation is not.
+- Programs run 11 to 36 times slower than under runc, since they are
+  emulated. Starting is fast; a long computation is not.
+- Each container is a whole browser: about 540 MiB of memory when idle.
 - No volumes, no published ports, no `docker exec`. Memory is the only
   limit that is applied.
 - The kernel in the tab is young. Treat this as an experiment, not as
@@ -109,6 +113,8 @@ $ nix flake check          # unit tests, and containers in a real Chromium
 $ nix build .#tabc-darwin  # a Mac binary, built on Linux
 $ nix fmt                  # before committing
 ```
+
+`tools/bench/` has the scripts behind the numbers on this page.
 
 ## Credits
 
