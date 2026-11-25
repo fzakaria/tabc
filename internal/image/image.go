@@ -6,6 +6,9 @@ package image
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -25,10 +28,14 @@ const (
 	guestArch = "arm64"
 )
 
-// Where the cache keeps layers under its root, a layer's file name, and
-// the name a layer has while it downloads.
+// Where the cache keeps layers and what each reference last resolved to
+// under its root, a layer's file name, and the name a layer has while
+// it downloads.
 const (
 	layersDir     = "layers"
+	imagesDir     = "images"
+	recordSuffix  = ".json"
+	recordMode    = 0o644
 	layerSuffix   = ".tar"
 	partialSuffix = ".partial"
 	cacheDirMode  = 0o755
@@ -52,16 +59,85 @@ func CacheDir() (string, error) {
 	return filepath.Join(base, cacheDirName), nil
 }
 
-// Pull fetches the image a reference names, such as "alpine" or
-// "ghcr.io/owner/name:tag", into the cache under cacheDir. A layer the
-// cache already holds is not fetched again. Each layer fetched is named
-// on progress.
-func Pull(ctx context.Context, reference, cacheDir string, progress io.Writer) (*Image, error) {
+// Refresh says whether Get asks the registry about an image the cache
+// already has.
+type Refresh int
+
+const (
+	// UseCached runs the cached image without asking, as an engine runs
+	// an image it has pulled.
+	UseCached Refresh = iota
+	// AlwaysPull asks the registry what the reference names now.
+	AlwaysPull
+)
+
+// Get returns the image a reference names, such as "alpine" or
+// "ghcr.io/owner/name:tag": from the cache under cacheDir when the
+// cache has it and refresh allows, else from its registry.
+func Get(ctx context.Context, reference, cacheDir string, refresh Refresh, progress io.Writer) (*Image, error) {
 	parsed, err := name.ParseReference(reference)
 	if err != nil {
 		return nil, fmt.Errorf("image %q: %w", reference, err)
 	}
 
+	record := filepath.Join(cacheDir, imagesDir, recordName(parsed.Name()))
+	if refresh == UseCached {
+		if cached, ok := loadRecord(record); ok {
+			return cached, nil
+		}
+	}
+
+	image, err := pull(ctx, parsed, cacheDir, progress)
+	if err != nil {
+		return nil, err
+	}
+	saveRecord(record, image)
+	return image, nil
+}
+
+// recordName is the file an image's record is kept in: the hash of the
+// reference's full name, which may hold characters a file name cannot.
+func recordName(fullName string) string {
+	sum := sha256.Sum256([]byte(fullName))
+	return hex.EncodeToString(sum[:]) + recordSuffix
+}
+
+// loadRecord returns the image a record describes, if the record is
+// there and every layer the record names still is.
+func loadRecord(path string) (*Image, bool) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, false
+	}
+	var image Image
+	if err := json.Unmarshal(data, &image); err != nil {
+		return nil, false
+	}
+	for _, layer := range image.Layers {
+		if _, err := os.Stat(layer); err != nil {
+			return nil, false
+		}
+	}
+	return &image, true
+}
+
+// saveRecord remembers what a reference resolved to. A record that
+// cannot be written only costs the next run a question to the registry.
+func saveRecord(path string, image *Image) {
+	data, err := json.Marshal(image)
+	if err != nil {
+		return
+	}
+	if err := os.MkdirAll(filepath.Dir(path), cacheDirMode); err != nil {
+		return
+	}
+	os.WriteFile(path, data, recordMode)
+}
+
+// pull fetches an image from its registry into the cache. A layer the
+// cache already holds is not fetched again. Each layer fetched is named
+// on progress.
+func pull(ctx context.Context, parsed name.Reference, cacheDir string, progress io.Writer) (*Image, error) {
 	platform := v1.Platform{OS: guestOS, Architecture: guestArch}
 	remoteImage, err := remote.Image(parsed,
 		remote.WithContext(ctx),

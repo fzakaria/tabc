@@ -42,6 +42,7 @@ const envTerm = "TERM=xterm-256color"
 type imageRun struct {
 	interactive bool
 	terminal    bool
+	pull        bool
 	env         []string
 	cwd         string
 	user        string
@@ -88,6 +89,9 @@ func parseImageRun(args []string) (imageRun, error) {
 			parsed.terminal = true
 		case "--rm":
 			// Every container here is removed when its program ends.
+		case "--pull":
+			// Ask the registry even for an image the cache has.
+			parsed.pull = true
 		case "-e", "--env":
 			var entry string
 			entry, err = value(name, inline, hasInline)
@@ -109,7 +113,7 @@ func parseImageRun(args []string) (imageRun, error) {
 			return parsed, err
 		}
 	}
-	return parsed, errors.New("usage: tabc run [-it] [-e NAME=value] [-w dir] [-u user] [-m memory] <image> [program...]")
+	return parsed, errors.New("usage: tabc run [-it] [--pull] [-e NAME=value] [-w dir] [-u user] [-m memory] <image> [program...]")
 }
 
 // parseMemory reads a memory limit: a number of bytes, or a number with
@@ -145,7 +149,11 @@ func runImage(args []string) (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	pulled, err := image.Pull(context.Background(), parsed.image, cache, os.Stderr)
+	refresh := image.UseCached
+	if parsed.pull {
+		refresh = image.AlwaysPull
+	}
+	pulled, err := image.Get(context.Background(), parsed.image, cache, refresh, os.Stderr)
 	if err != nil {
 		return 0, err
 	}
