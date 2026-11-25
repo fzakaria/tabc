@@ -8,6 +8,10 @@
 //	tabc kill <id> <signal>
 //	tabc delete <id>
 //
+// and with no engine at all, tabc pulls an image and runs it:
+//
+//	tabc run [-it] <image> [program and arguments]
+//
 // create starts a supervisor (internal/supervisor), which starts
 // headless Chromium on a page that boots a Linux guest with the
 // container's image as its root. start runs the container's program in
@@ -76,8 +80,14 @@ func main() {
 	case commandFeatures:
 		err = printFeatures()
 	case commandRun:
+		// With a bundle, run is the lifecycle in one command. Without
+		// one, the words after run name an image and a program.
 		var status int
-		status, err = run(inv)
+		if inv.Bundle != "" {
+			status, err = runBundle(inv)
+		} else {
+			status, err = runImage(argumentsAfter(os.Args[1:], commandRun))
+		}
 		if err == nil {
 			os.Exit(status)
 		}
@@ -190,4 +200,14 @@ func printFeatures() error {
 		"ociVersionMin": "1.0.0",
 		"ociVersionMax": specs.Version,
 	})
+}
+
+// argumentsAfter returns the words after the first `command` in args.
+func argumentsAfter(args []string, command string) []string {
+	for index, arg := range args {
+		if arg == command {
+			return args[index+1:]
+		}
+	}
+	return nil
 }

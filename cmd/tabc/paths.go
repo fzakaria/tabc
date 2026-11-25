@@ -26,8 +26,15 @@ const (
 // relativeShare is the share directory next to an installed binary.
 const relativeShare = "../share/tabc"
 
-// browserNames are the names Chromium goes by on a PATH.
-var browserNames = []string{"chromium", "chromium-browser", "google-chrome-stable", "google-chrome"}
+// browserNames are the names Chromium goes by on a PATH, and
+// browserPaths where a Mac keeps the application, which is on no PATH.
+var (
+	browserNames = []string{"chromium", "chromium-browser", "google-chrome-stable", "google-chrome"}
+	browserPaths = []string{
+		"/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+		"/Applications/Chromium.app/Contents/MacOS/Chromium",
+	}
+)
 
 // shareDir returns the directory holding the page, the SDK and the
 // guest's init: the environment's, the built-in one, or the one next to
@@ -65,5 +72,10 @@ func chromiumPath() (string, error) {
 			return path, nil
 		}
 	}
-	return "", errors.New("no Chromium found; set " + envChromium)
+	for _, path := range browserPaths {
+		if _, err := os.Stat(path); err == nil {
+			return path, nil
+		}
+	}
+	return "", errors.New("no Chromium or Chrome found; set " + envChromium)
 }

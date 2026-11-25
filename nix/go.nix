@@ -2,5 +2,5 @@
 # vendored set of dependencies.
 {
   version = "0.1.0";
-  vendorHash = "sha256-cMlM4SCbKaZfMQjJigHSVL3BMoJ6BHzZhi6hqu2Sng8=";
+  vendorHash = "sha256-Q3FAXd1q6K1IwRYeqrb9K/ptxXYJbsIF32IBpXtk++c=";
 }

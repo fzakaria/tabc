@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -19,6 +20,7 @@ import (
 
 	"github.com/fzakaria/tabc/internal/bundle"
 	"github.com/fzakaria/tabc/internal/cli"
+	"github.com/fzakaria/tabc/internal/plan"
 	"github.com/fzakaria/tabc/internal/signals"
 	"github.com/fzakaria/tabc/internal/state"
 	"github.com/fzakaria/tabc/internal/supervisor"
@@ -51,10 +53,30 @@ const (
 	deletePoll = 20 * time.Millisecond
 )
 
-// create makes a container: its record, and a supervisor that brings
-// the guest up and then waits for start.
+// launch is what starting a supervisor takes.
+type launch struct {
+	root string
+	id   string
+	dir  string
+
+	// consoleSocket is the engine's socket for the terminal, or "".
+	consoleSocket string
+
+	// stdin is the program's input, nil for this command's own.
+	stdin *os.File
+
+	// start starts the supervisor's process in the container's network.
+	start func(process *exec.Cmd) error
+
+	// created runs once the supervisor's process exists, before the
+	// guest is up: an engine's hooks.
+	created func(pid int) error
+}
+
+// create makes a container from a bundle: its record, and a supervisor
+// that brings the guest up and then waits for start.
 func create(inv cli.Invocation) error {
-	supervisorProcess, _, err := spawn(inv)
+	supervisorProcess, _, err := createFromBundle(inv)
 	if err != nil {
 		return err
 	}
@@ -64,45 +86,65 @@ func create(inv cli.Invocation) error {
 	return supervisorProcess.Process.Release()
 }
 
-// run is create, start and wait in one command, for running a bundle
-// by hand: the supervisor stays this command's child, and its status
-// is the program's.
-func run(inv cli.Invocation) (int, error) {
-	supervisorProcess, dir, err := spawn(inv)
+// runBundle is create, start and wait in one command, for running a
+// bundle by hand: the supervisor stays this command's child, and its
+// status is the program's.
+func runBundle(inv cli.Invocation) (int, error) {
+	supervisorProcess, dir, err := createFromBundle(inv)
 	if err != nil {
 		return 0, err
 	}
 	id, _ := inv.ID()
-	defer state.Remove(state.Root(inv.Root), id)
+	return startAndWait(supervisorProcess, state.Root(inv.Root), id, dir)
+}
 
-	if err := supervisor.Start(filepath.Join(dir, state.SocketFile)); err != nil {
+// startAndWait runs a created container's program and waits for the
+// program to end. A signal sent to this command meanwhile is passed to
+// the program. The container is deleted afterwards.
+func startAndWait(supervisorProcess *exec.Cmd, root, id, dir string) (int, error) {
+	defer state.Remove(root, id)
+	socket := filepath.Join(dir, state.SocketFile)
+
+	if err := supervisor.Start(socket); err != nil {
 		supervisorProcess.Process.Kill()
 		supervisorProcess.Wait()
 		return 0, err
 	}
 
-	err = supervisorProcess.Wait()
+	// The supervisor leads a session of its own, so a signal meant for
+	// the container arrives here and has to be carried over.
+	caught := make(chan os.Signal, 1)
+	signal.Notify(caught, syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP, syscall.SIGQUIT)
+	defer signal.Stop(caught)
+	go func() {
+		for received := range caught {
+			number, _ := received.(syscall.Signal)
+			name, err := signals.Parse(strconv.Itoa(int(number)))
+			if err != nil {
+				continue
+			}
+			supervisor.Kill(socket, name)
+		}
+	}()
+
+	err := supervisorProcess.Wait()
 	var exit *exec.ExitError
 	if errors.As(err, &exit) {
 		return exit.ExitCode(), nil
 	}
-	if err != nil {
-		return 0, err
-	}
-	return 0, nil
+	return 0, err
 }
 
-// spawn starts a container's supervisor and waits until the guest is up.
-// It returns the supervisor and the container's state directory.
-func spawn(inv cli.Invocation) (*exec.Cmd, string, error) {
+// createFromBundle makes a container from the bundle the command line
+// names and waits until the guest is up. It returns the supervisor and
+// the container's state directory.
+func createFromBundle(inv cli.Invocation) (*exec.Cmd, string, error) {
 	id, err := inv.ID()
 	if err != nil {
 		return nil, "", err
 	}
 	root := state.Root(inv.Root)
 
-	// The bundle is read here as well as in the supervisor, so a bundle
-	// that cannot be run fails before anything is started.
 	bundleDir := inv.Bundle
 	if bundleDir == "" {
 		bundleDir = defaultBundle
@@ -112,10 +154,6 @@ func spawn(inv cli.Invocation) (*exec.Cmd, string, error) {
 		return nil, "", err
 	}
 
-	dir, err := state.Create(root, id)
-	if err != nil {
-		return nil, "", err
-	}
 	record := state.Container{
 		ID:          id,
 		Bundle:      loaded.Dir,
@@ -123,21 +161,23 @@ func spawn(inv cli.Invocation) (*exec.Cmd, string, error) {
 		Created:     time.Now().UTC(),
 		Annotations: loaded.Spec.Annotations,
 	}
-	if err := state.Save(dir, record); err != nil {
-		state.Remove(root, id)
-		return nil, "", err
-	}
-
-	// From here on a failure leaves nothing behind, so what the browser
-	// said on its way down goes into the error: the log is about to be
-	// removed with the rest.
-	process, err := startSupervisor(inv, root, id, dir, loaded, &record)
+	process, dir, err := createContainer(record, loaded.Plan(), launch{
+		root:          root,
+		id:            id,
+		consoleSocket: inv.ConsoleSocket,
+		start: func(process *exec.Cmd) error {
+			return startInNetwork(process, loaded)
+		},
+		// The supervisor is the container's process from the engine's
+		// side, and the hooks are told its pid: Docker's hook reads the
+		// network namespace to attach the container's interface to from
+		// that pid.
+		created: func(pid int) error {
+			record.Pid = pid
+			return runCreateHooks(loaded, record)
+		},
+	})
 	if err != nil {
-		tail := logTail(filepath.Join(dir, state.LogFile))
-		state.Remove(root, id)
-		if tail != "" {
-			err = fmt.Errorf("%w\n%s", err, tail)
-		}
 		return nil, "", err
 	}
 
@@ -148,6 +188,40 @@ func spawn(inv cli.Invocation) (*exec.Cmd, string, error) {
 			state.Remove(root, id)
 			return nil, "", err
 		}
+	}
+	return process, dir, nil
+}
+
+// createContainer writes a container's record and plan, starts its
+// supervisor and waits until the guest is up. A failure leaves nothing
+// behind.
+func createContainer(record state.Container, planned plan.Plan, l launch) (*exec.Cmd, string, error) {
+	dir, err := state.Create(l.root, l.id)
+	if err != nil {
+		return nil, "", err
+	}
+	l.dir = dir
+
+	fail := func(err error) (*exec.Cmd, string, error) {
+		// What the browser said on its way down goes into the error:
+		// the log is about to be removed with the rest.
+		tail := logTail(filepath.Join(dir, state.LogFile))
+		state.Remove(l.root, l.id)
+		if tail != "" {
+			err = fmt.Errorf("%w\n%s", err, tail)
+		}
+		return nil, "", err
+	}
+
+	if err := state.Save(dir, record); err != nil {
+		return fail(err)
+	}
+	if err := plan.Save(dir, planned); err != nil {
+		return fail(err)
+	}
+	process, err := startSupervisor(l, &record)
+	if err != nil {
+		return fail(err)
 	}
 	return process, dir, nil
 }
@@ -166,20 +240,20 @@ func logTail(path string) string {
 	return strings.Join(lines, "\n")
 }
 
-// startSupervisor starts the supervisor in the container's network
-// namespace, runs the engine's hooks, and waits for the supervisor to
-// say the guest is up.
-func startSupervisor(inv cli.Invocation, root, id, dir string, loaded *bundle.Bundle, record *state.Container) (*exec.Cmd, error) {
+// startSupervisor starts the supervisor, runs what the launch wants run
+// once the supervisor exists, and waits for the supervisor to say the
+// guest is up.
+func startSupervisor(l launch, record *state.Container) (*exec.Cmd, error) {
 	self, err := os.Executable()
 	if err != nil {
 		return nil, err
 	}
 
-	args := []string{commandSupervise, "--root", root}
-	if inv.ConsoleSocket != "" {
-		args = append(args, "--console-socket", inv.ConsoleSocket)
+	args := []string{commandSupervise, "--root", l.root}
+	if l.consoleSocket != "" {
+		args = append(args, "--console-socket", l.consoleSocket)
 	}
-	args = append(args, id)
+	args = append(args, l.id)
 
 	// The pipe the supervisor reports on.
 	readyRead, readyWrite, err := os.Pipe()
@@ -188,33 +262,36 @@ func startSupervisor(inv cli.Invocation, root, id, dir string, loaded *bundle.Bu
 	}
 	defer readyRead.Close()
 
-	// The supervisor's stdin, stdout and stderr are this command's,
-	// which the engine made the container's. A session of its own keeps
-	// the supervisor apart from the engine's terminal and process group.
+	// The supervisor's stdin, stdout and stderr are the program's:
+	// this command's own, which an engine made the container's. A
+	// session of its own keeps the supervisor apart from the caller's
+	// terminal and process group.
 	process := exec.Command(self, args...)
 	process.Stdin = os.Stdin
+	if l.stdin != nil {
+		process.Stdin = l.stdin
+	}
 	process.Stdout = os.Stdout
 	process.Stderr = os.Stderr
 	process.ExtraFiles = []*os.File{readyWrite}
 	process.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 
-	err = startInNetwork(process, loaded)
+	err = l.start(process)
 	readyWrite.Close()
 	if err != nil {
 		return nil, fmt.Errorf("starting the supervisor: %w", err)
 	}
 
-	// The supervisor is the container's process from the engine's side,
-	// and the hooks are told its pid: Docker's hook reads the network
-	// namespace to attach the container's interface to from that pid.
 	record.Pid = process.Process.Pid
-	if err := state.Save(dir, *record); err != nil {
+	if err := state.Save(l.dir, *record); err != nil {
 		process.Process.Kill()
 		return nil, err
 	}
-	if err := runCreateHooks(loaded, *record); err != nil {
-		process.Process.Kill()
-		return nil, err
+	if l.created != nil {
+		if err := l.created(process.Process.Pid); err != nil {
+			process.Process.Kill()
+			return nil, err
+		}
 	}
 
 	// One line: ReadyOK, or why there is no container.
@@ -225,7 +302,7 @@ func startSupervisor(inv cli.Invocation, root, id, dir string, loaded *bundle.Bu
 	}
 	process.Process.Kill()
 	if answer == "" {
-		return nil, fmt.Errorf("the supervisor exited without a word (%v); see %s", err, filepath.Join(dir, state.LogFile))
+		return nil, fmt.Errorf("the supervisor exited without a word (%v)", err)
 	}
 	return nil, errors.New(answer)
 }
