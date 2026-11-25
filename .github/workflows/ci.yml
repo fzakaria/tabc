@@ -1,0 +1,41 @@
+# Formatting first, then `nix flake check`, which runs everything the
+# flake defines:
+#
+#   checks.tabc — the Go tests, as the package builds
+#   checks.e2e  — containers from an example bundle, run in a real
+#                 headless Chromium: output, exit status, both output
+#                 streams, input, a writable root
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      # The end-to-end check runs Chromium with its sandbox on, and the
+      # sandbox needs to make a user namespace. Ubuntu's runners deny
+      # that to unprivileged programs unless this is turned off.
+      - name: Allow user namespaces
+        run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+
+      - uses: cachix/install-nix-action@v31
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+
+      - name: Formatting
+        run: nix fmt -- --ci
+
+      - name: Tests
+        run: nix flake check -L
