@@ -154,7 +154,7 @@ func TestTerminalAndLimits(t *testing.T) {
 	if b.MemoryLimit() != limit {
 		t.Errorf("memory limit %d", b.MemoryLimit())
 	}
-	if b.NetworkNamespace() != "/run/netns/x" {
-		t.Errorf("network namespace %q", b.NetworkNamespace())
+	if path, wanted := b.NetworkNamespace(); !wanted || path != "/run/netns/x" {
+		t.Errorf("network namespace %q, wanted %v", path, wanted)
 	}
 }

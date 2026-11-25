@@ -219,18 +219,27 @@ func isBind(mount specs.Mount) bool {
 	return false
 }
 
-// NetworkNamespace returns the path of the network namespace the engine
-// made for the container, or "" when the configuration names none: a
-// container on the host's network, or one whose namespace the runtime
-// is asked to make.
-func (b *Bundle) NetworkNamespace() string {
+// NetworkNamespace says which network the container is on. wanted is
+// false when the configuration has no network namespace, which is a
+// container on the host's network. Otherwise path names the namespace
+// the engine made, or is "" when the runtime is asked to make one.
+func (b *Bundle) NetworkNamespace() (path string, wanted bool) {
 	if b.Spec.Linux == nil {
-		return ""
+		return "", false
 	}
 	for _, namespace := range b.Spec.Linux.Namespaces {
 		if namespace.Type == specs.NetworkNamespace {
-			return strings.TrimSpace(namespace.Path)
+			return strings.TrimSpace(namespace.Path), true
 		}
 	}
-	return ""
+	return "", false
+}
+
+// ResolvConf returns the resolver configuration the engine wrote for
+// the container, the content of the file bound at /etc/resolv.conf, or
+// "" when the engine bound none. The file names servers that exist on
+// the container's network, which is where the supervisor makes the
+// guest's lookups.
+func (b *Bundle) ResolvConf() string {
+	return b.boundFiles()[resolvPath]
 }
