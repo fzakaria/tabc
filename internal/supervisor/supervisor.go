@@ -143,6 +143,7 @@ func run(options Options, dir string, logger *log.Logger, logFile *os.File) (int
 	if err != nil {
 		return 0, fmt.Errorf("the container's plan: %w", err)
 	}
+	logger.Printf("supervising %s", options.ID)
 
 	// A network namespace made for this container starts with loopback
 	// down, and the browser reaches the supervisor over loopback.
@@ -256,6 +257,7 @@ func run(options Options, dir string, logger *log.Logger, logFile *os.File) (int
 	if err != nil {
 		return 0, err
 	}
+	logger.Printf("browser started")
 	browserGone := make(chan error, 1)
 	go func() { browserGone <- browser.Wait() }()
 	defer stopBrowser(browser, browserGone)

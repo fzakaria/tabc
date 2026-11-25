@@ -46,8 +46,8 @@ const defaultHookTimeout = 30 * time.Second
 // repeats.
 const logTailLines = 15
 
-// deleteWait is how long delete waits for a killed supervisor to go,
-// and deletePoll how often it looks.
+// deleteWait is how long delete waits for a supervisor to go, and
+// deletePoll how often it looks.
 const (
 	deleteWait = 5 * time.Second
 	deletePoll = 20 * time.Millisecond
@@ -443,14 +443,15 @@ func remove(inv cli.Invocation) error {
 		// The supervisor leads a session of its own, so its process
 		// group is the supervisor and the browser it started.
 		syscall.Kill(-record.Pid, syscall.SIGKILL)
-		deadline := time.Now().Add(deleteWait)
-		for time.Now().Before(deadline) {
-			current, err := state.Load(root, id)
-			if err != nil || current.Status == state.Stopped {
-				break
-			}
-			time.Sleep(deletePoll)
-		}
+	}
+
+	// A container is stopped as soon as its program ends, while its
+	// supervisor is still stopping the browser and writing its log. The
+	// directory goes once the supervisor has: removing it under the
+	// supervisor fails on whatever the supervisor writes next.
+	deadline := time.Now().Add(deleteWait)
+	for state.Alive(record) && time.Now().Before(deadline) {
+		time.Sleep(deletePoll)
 	}
 	return state.Remove(root, id)
 }

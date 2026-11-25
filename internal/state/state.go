@@ -160,6 +160,13 @@ func Remove(root, id string) error {
 	return os.RemoveAll(Dir(root, id))
 }
 
+// Alive reports whether a container's supervisor still exists. A
+// container reads as stopped from the moment its program ends, and the
+// supervisor is a little longer in going: it stops the browser first.
+func Alive(c Container) bool {
+	return alive(c.Pid)
+}
+
 // alive reports whether a process exists. Signal 0 checks for the
 // process without sending anything; EPERM means the process exists and
 // belongs to someone else.

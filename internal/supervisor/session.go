@@ -101,6 +101,7 @@ func (s *session) serve(w http.ResponseWriter, r *http.Request) {
 	}
 	s.socket = socket
 	s.mu.Unlock()
+	s.logf("page connected")
 	defer close(s.gone)
 	defer socket.CloseNow()
 
