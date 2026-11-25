@@ -4,11 +4,14 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"io/fs"
 	"net"
 	"net/http"
+	"path"
 	"path/filepath"
 	"strings"
 
+	"github.com/fzakaria/tabc/internal/assets"
 	"github.com/fzakaria/tabc/internal/guest"
 )
 
@@ -34,14 +37,8 @@ const (
 	netConnect    = "tcp"
 )
 
-// Where the share directory keeps the page, the unkernel SDK with its
-// kernel, and the guest's init.
-const (
-	sharePage     = "page"
-	shareUnkernel = "unkernel"
-	shareInit     = "init"
-	indexFile     = "index.html"
-)
+// indexFile is the page's entry.
+const indexFile = "index.html"
 
 // pageConfig is what the page needs to know before it boots the guest.
 type pageConfig struct {
@@ -61,8 +58,10 @@ type fileServer interface {
 
 // server is the HTTP server one container's page talks to.
 type server struct {
-	token    string
-	shareDir string
+	token string
+	// share holds the page, the SDK and the guest's init
+	// (internal/assets).
+	share    fs.FS
 	config   pageConfig
 	spec     guest.Spec
 	files    fileServer
@@ -107,7 +106,7 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case routeSpec:
 		writeJSON(w, s.spec)
 	case routeInit:
-		http.ServeFile(w, r, filepath.Join(s.shareDir, shareInit))
+		http.ServeFileFS(w, r, s.share, assets.Init)
 	case routeFS:
 		s.files.Serve(w, r, remainder)
 	case routeControl:
@@ -115,12 +114,12 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case routeNet:
 		s.serveNet(w, r, remainder)
 	case routeUnkernel:
-		serveShared(w, r, filepath.Join(s.shareDir, shareUnkernel), remainder)
+		s.serveShared(w, r, assets.Unkernel, remainder)
 	default:
 		if rest == "" {
 			rest = indexFile
 		}
-		serveShared(w, r, filepath.Join(s.shareDir, sharePage), rest)
+		s.serveShared(w, r, assets.Page, rest)
 	}
 }
 
@@ -144,7 +143,7 @@ func (s *server) serveNet(w http.ResponseWriter, r *http.Request, what string) {
 // serveShared serves one file from a directory of the share. The name
 // comes from the page, so a name that climbs out of the directory is
 // refused.
-func serveShared(w http.ResponseWriter, r *http.Request, dir, name string) {
+func (s *server) serveShared(w http.ResponseWriter, r *http.Request, dir, name string) {
 	if !filepath.IsLocal(name) {
 		http.NotFound(w, r)
 		return
@@ -152,13 +151,13 @@ func serveShared(w http.ResponseWriter, r *http.Request, dir, name string) {
 
 	// Browsers load a module or a wasm file only under its own type,
 	// and the host's MIME table is not to be relied on for either.
-	switch filepath.Ext(name) {
+	switch path.Ext(name) {
 	case ".js", ".mjs":
 		w.Header().Set("Content-Type", "text/javascript")
 	case ".wasm":
 		w.Header().Set("Content-Type", "application/wasm")
 	}
-	http.ServeFile(w, r, filepath.Join(dir, name))
+	http.ServeFileFS(w, r, s.share, path.Join(dir, name))
 }
 
 // writeJSON writes a JSON answer.

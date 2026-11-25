@@ -353,7 +353,7 @@ func supervise(inv cli.Invocation) int {
 		return supervisor.ExitFailed
 	}
 
-	share, err := shareDir()
+	files, err := share()
 	if err != nil {
 		return failSupervise(err)
 	}
@@ -367,7 +367,7 @@ func supervise(inv cli.Invocation) int {
 		ID:            id,
 		ConsoleSocket: inv.ConsoleSocket,
 		Ready:         os.NewFile(readyDescriptor, "ready"),
-		ShareDir:      share,
+		Share:         files,
 		Chromium:      browser,
 	})
 }

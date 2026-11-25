@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"log"
 	"net"
 	"net/http"
@@ -95,9 +96,9 @@ type Options struct {
 	// Ready is the pipe to the creator, nil when nobody waits.
 	Ready *os.File
 
-	// ShareDir holds the page, the SDK and the guest's init, and
-	// Chromium is the browser to run.
-	ShareDir string
+	// Share holds the page, the SDK and the guest's init
+	// (internal/assets), and Chromium is the browser to run.
+	Share    fs.FS
 	Chromium string
 }
 
@@ -180,8 +181,8 @@ func run(options Options, dir string, logger *log.Logger, logFile *os.File) (int
 	}
 	conversation := newSession(stdout, stderr, logger.Printf)
 	pages := &server{
-		token:    token,
-		shareDir: options.ShareDir,
+		token: token,
+		share: options.Share,
 		config: pageConfig{
 			Terminal:  hasTerminal,
 			Cols:      orDefault(planned.Cols, defaultCols),

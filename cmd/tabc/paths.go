@@ -3,28 +3,23 @@ package main
 import (
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"os/exec"
-	"path/filepath"
+
+	"github.com/fzakaria/tabc/internal/assets"
 )
 
-// shareDirBuilt and chromiumBuilt are where the package that built
-// tabc put the page, the SDK and the guest's init, and the browser the
-// package pins. Both are set by the linker (nix/package.nix) and empty
-// in a plain `go build`.
-var (
-	shareDirBuilt string
-	chromiumBuilt string
-)
+// chromiumBuilt is the browser the package that built tabc pins, set by
+// the linker (nix/package.nix) and empty in a plain `go build`.
+var chromiumBuilt string
 
-// The variables that override both.
+// The variables that override the files tabc serves a page and the
+// browser tabc runs.
 const (
 	envShare    = "TABC_SHARE"
 	envChromium = "TABC_CHROMIUM"
 )
-
-// relativeShare is the share directory next to an installed binary.
-const relativeShare = "../share/tabc"
 
 // browserNames are the names Chromium goes by on a PATH, and
 // browserPaths where a Mac keeps the application, which is on no PATH.
@@ -36,26 +31,16 @@ var (
 	}
 )
 
-// shareDir returns the directory holding the page, the SDK and the
-// guest's init: the environment's, the built-in one, or the one next to
-// the binary.
-func shareDir() (string, error) {
+// share returns the page, the SDK and the guest's init: the directory
+// the environment names, else the files built into the binary.
+func share() (fs.FS, error) {
 	if dir := os.Getenv(envShare); dir != "" {
-		return dir, nil
+		return os.DirFS(dir), nil
 	}
-	if shareDirBuilt != "" {
-		return shareDirBuilt, nil
+	if files := assets.Embedded(); files != nil {
+		return files, nil
 	}
-
-	self, err := os.Executable()
-	if err != nil {
-		return "", err
-	}
-	dir := filepath.Join(filepath.Dir(self), relativeShare)
-	if _, err := os.Stat(dir); err != nil {
-		return "", fmt.Errorf("no share directory at %s; set %s", dir, envShare)
-	}
-	return dir, nil
+	return nil, fmt.Errorf("this tabc was built without its page and kernel; set %s to the output of `nix build .#share`", envShare)
 }
 
 // chromiumPath returns the browser to run: the environment's, the
