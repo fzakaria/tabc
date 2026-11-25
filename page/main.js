@@ -119,7 +119,9 @@ function imageFs() {
       await call("attr", path);
       return {
         read: async (offset, length) =>
-          new Uint8Array(await (await call("read", path, `&o=${offset}&n=${length}`)).arrayBuffer()),
+          new Uint8Array(
+            await (await call("read", path, `&o=${offset}&n=${length}`)).arrayBuffer(),
+          ),
         getattr: async () => (await call("attr", path)).json(),
       };
     },
