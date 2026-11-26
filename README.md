@@ -60,6 +60,18 @@ $ nix run github:fzakaria/tabc -- run alpine echo hi
 hi
 ```
 
+Without Nix, each [release] has an archive for Linux and for a Mac,
+x86-64 and arm64:
+
+```console
+$ curl -L https://github.com/fzakaria/tabc/releases/latest/download/tabc-linux-amd64.tar.gz | tar -xz
+$ ./tabc-linux-amd64/tabc run alpine echo hi
+hi
+```
+
+A release's tabc uses the Chrome or Chromium you have installed, and
+`tocker` the `docker` command line you have installed.
+
 tabc is one file, and `tocker` is the same file under another name. On
 Linux the Nix package brings its own Chromium. On a Mac tabc looks for
 Chrome in `/Applications`, or uses the one `TABC_CHROMIUM` points at.
@@ -203,3 +215,4 @@ module, and the SDK that boots it.
 MIT, please see [LICENSE](LICENSE). unkernel's kernel is GPL-2.0.
 
 [unkernel]: https://github.com/pithings/unkernel
+[release]: https://github.com/fzakaria/tabc/releases
