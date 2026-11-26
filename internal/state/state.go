@@ -67,6 +67,10 @@ type Container struct {
 	// Profile is the browser's profile directory, which may be outside
 	// the container's directory (internal/supervisor, makeProfile).
 	Profile string `json:"profile,omitempty"`
+
+	// URL is the container's page, set when a browser the supervisor
+	// did not start is to load it.
+	URL string `json:"url,omitempty"`
 }
 
 // Root returns the directory state is kept under: the one given, else

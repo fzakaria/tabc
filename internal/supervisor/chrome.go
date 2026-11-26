@@ -1,6 +1,7 @@
 package supervisor
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -79,6 +80,9 @@ func makeProfile(dir string) (string, error) {
 // in profile and its own output in log. extraFlags come after tabc's
 // own, so they can override them.
 func startBrowser(binary, profile, url string, extraFlags []string, log *os.File) (*exec.Cmd, error) {
+	if binary == "" {
+		return nil, errors.New("no Chromium or Chrome found; set TABC_CHROMIUM, or use --open to run in your own browser")
+	}
 	args := append([]string{}, chromiumFlags...)
 	args = append(args, "--user-data-dir="+profile)
 	args = append(args, extraFlags...)

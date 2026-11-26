@@ -30,6 +30,21 @@ const (
 	TerminalInherit Terminal = "inherit"
 )
 
+// Browser is who loads the container's page.
+type Browser string
+
+const (
+	// BrowserHeadless: a headless Chromium the supervisor starts for
+	// this container alone, with a profile of its own. The default.
+	BrowserHeadless Browser = ""
+	// BrowserOpen: the user's own browser, which the supervisor asks
+	// the desktop to open on the page.
+	BrowserOpen Browser = "open"
+	// BrowserExternal: whoever made the container loads the page
+	// themselves, from the address in the container's record.
+	BrowserExternal Browser = "external"
+)
+
 // fileName is the plan's file in a container's state directory, and
 // fileMode its mode: the plan may hold an environment with secrets in
 // it.
@@ -66,6 +81,11 @@ type Plan struct {
 
 	// Publish are ports of the host forwarded to ports of the guest.
 	Publish []Publish `json:"publish,omitempty"`
+
+	// Browser is who loads the container's page, and Title what the
+	// page calls the container.
+	Browser Browser `json:"browser,omitempty"`
+	Title   string  `json:"title,omitempty"`
 }
 
 // Publish is one port of the host forwarded to a port of the guest.

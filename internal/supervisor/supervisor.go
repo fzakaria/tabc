@@ -51,6 +51,10 @@ const (
 	killGrace   = 5 * time.Second
 )
 
+// openTimeout is how long a browser that a person has to bring gets to
+// load the page: long enough to find the tab.
+const openTimeout = 10 * time.Minute
+
 // loopbackAddress is where the page's server listens: loopback, on a
 // port the system picks. loopbackHost is where a published port
 // listens when its flag names no address.
@@ -215,6 +219,7 @@ func run(options Options, dir string, logger *log.Logger, logFile *os.File) (int
 			Cols:        orDefault(planned.Cols, defaultCols),
 			Rows:        orDefault(planned.Rows, defaultRows),
 			Term:        terminalType,
+			Title:       orTitle(planned.Title, options.ID),
 			MemoryMiB:   memoryMiB(planned.MemoryBytes),
 			Network:     true,
 			MirrorPorts: options.MirrorPorts,
@@ -268,27 +273,45 @@ func run(options Options, dir string, logger *log.Logger, logFile *os.File) (int
 		}
 	})
 
-	// The browser, with a profile that goes when the container does.
-	// The profile is in the record too, so a delete of a container whose
-	// supervisor was killed still removes it.
-	profile, err := makeProfile(dir)
-	if err != nil {
-		return 0, err
-	}
-	defer os.RemoveAll(profile)
-	record.Profile = profile
-	if err := state.Save(dir, record); err != nil {
-		return 0, err
-	}
-	browser, err := startBrowser(options.Chromium, profile, pages.pageURL(listener),
-		strings.Fields(os.Getenv(envBrowserFlags)), logFile)
-	if err != nil {
-		return 0, err
-	}
-	logger.Printf("browser started")
+	// The browser: a headless one of the container's own, or whichever
+	// browser is going to be shown the page.
 	browserGone := make(chan error, 1)
-	go func() { browserGone <- browser.Wait() }()
-	defer stopBrowser(browser, browserGone)
+	if planned.Browser == plan.BrowserHeadless {
+		// A profile that goes when the container does. The profile is in
+		// the record too, so a delete of a container whose supervisor was
+		// killed still removes it.
+		profile, err := makeProfile(dir)
+		if err != nil {
+			return 0, err
+		}
+		defer os.RemoveAll(profile)
+		record.Profile = profile
+		if err := state.Save(dir, record); err != nil {
+			return 0, err
+		}
+		browser, err := startBrowser(options.Chromium, profile, pages.pageURL(listener),
+			strings.Fields(os.Getenv(envBrowserFlags)), logFile)
+		if err != nil {
+			return 0, err
+		}
+		logger.Printf("browser started")
+		go func() { browserGone <- browser.Wait() }()
+		defer stopBrowser(browser, browserGone)
+	} else {
+		// The page's address goes in the record, for whoever loads it,
+		// and to the terminal, for a person to click.
+		record.URL = pages.pageURL(listener)
+		if err := state.Save(dir, record); err != nil {
+			return 0, err
+		}
+		logger.Printf("waiting for a browser at %s", record.URL)
+		if planned.Browser == plan.BrowserOpen {
+			fmt.Fprintf(os.Stderr, "tabc: the container is the page at %s\n", record.URL)
+			if err := openInBrowser(record.URL); err != nil {
+				fmt.Fprintf(os.Stderr, "tabc: could not open a browser (%v); open the page yourself\n", err)
+			}
+		}
+	}
 
 	// The supervisor's own end: an engine that gives up on a container
 	// signals its process.
@@ -302,8 +325,8 @@ func run(options Options, dir string, logger *log.Logger, logFile *os.File) (int
 		return 0, fmt.Errorf("the page failed: %s", message)
 	case err := <-browserGone:
 		return 0, fmt.Errorf("the browser exited before the guest was up (%v); see %s", err, logFile.Name())
-	case <-time.After(bootTimeout):
-		return 0, fmt.Errorf("the guest was not up after %s; see %s", bootTimeout, logFile.Name())
+	case <-time.After(bootTimeoutFor(planned.Browser)):
+		return 0, fmt.Errorf("the guest was not up after %s; see %s", bootTimeoutFor(planned.Browser), logFile.Name())
 	case caught := <-interrupted:
 		return 0, fmt.Errorf("stopped by %s while the guest was starting", caught)
 	}
@@ -524,4 +547,23 @@ func orDefault(value, fallback int) int {
 		return fallback
 	}
 	return value
+}
+
+// bootTimeoutFor returns how long the guest gets to come up, which is
+// longer when a person has to open the page than when the supervisor's
+// own browser does.
+func bootTimeoutFor(browser plan.Browser) time.Duration {
+	if browser == plan.BrowserHeadless {
+		return bootTimeout
+	}
+	return openTimeout
+}
+
+// orTitle returns the container's title, or its id when the plan gives
+// none.
+func orTitle(title, id string) string {
+	if title == "" {
+		return id
+	}
+	return title
 }

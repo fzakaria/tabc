@@ -367,10 +367,9 @@ func supervise(inv cli.Invocation) int {
 	if err != nil {
 		return failSupervise(err)
 	}
-	browser, err := chromiumPath()
-	if err != nil {
-		return failSupervise(err)
-	}
+	// A container shown in a browser somebody else brings needs none
+	// here, so a missing Chromium is only an error once it is wanted.
+	browser, _ := chromiumPath()
 
 	return supervisor.Run(supervisor.Options{
 		Root:          state.Root(inv.Root),

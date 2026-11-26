@@ -43,10 +43,12 @@ const indexFile = "index.html"
 
 // pageConfig is what the page needs to know before it boots the guest.
 type pageConfig struct {
-	Terminal  bool   `json:"terminal"`
-	Cols      int    `json:"cols"`
-	Rows      int    `json:"rows"`
-	Term      string `json:"term"`
+	Terminal bool   `json:"terminal"`
+	Cols     int    `json:"cols"`
+	Rows     int    `json:"rows"`
+	Term     string `json:"term"`
+	// Title is what the page calls the container.
+	Title     string `json:"title"`
 	MemoryMiB int    `json:"memoryMiB"`
 	Network   bool   `json:"network"`
 	// MirrorPorts has the page watch which ports the program opens.

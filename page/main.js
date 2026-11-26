@@ -73,9 +73,72 @@ const LOST_STATUS = 255;
 const SEND_HIGH_WATER = 1 << 20;
 const SEND_POLL_MS = 5;
 
+// How near the end of the output a reader has to be for new output to
+// scroll into view.
+const FOLLOW_SLACK_PX = 40;
+
 // How long an inbound connection whose outside has finished sending may
 // stay quiet before the page ends it.
 const INBOUND_QUIET_MS = 30000;
+
+// What the page shows of the container: its name, how it is doing, and
+// what the program printed. The states are the status dot's colours
+// (index.html).
+const titleElement = document.getElementById("title");
+const statusElement = document.getElementById("status");
+const outputElement = document.getElementById("output");
+const State = Object.freeze({
+  WAITING: "waiting",
+  RUNNING: "running",
+  EXITED: "exited",
+  FAILED: "failed",
+});
+
+// The most characters of output the page keeps on show. A container
+// may print for days; the page is a window on the end of it.
+const OUTPUT_LIMIT = 200000;
+
+// Escape sequences a program prints for a terminal, which a page that
+// only shows text leaves out: colours, cursor movement, window titles.
+const ESCAPES = /\x1b\[[0-9;?]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x1b[@-_]/g;
+
+function setStatus(state, text) {
+  statusElement.dataset.state = state;
+  statusElement.textContent = text;
+}
+
+// One decoder per stream, since a character may arrive split across two
+// chunks.
+const decoders = new Map();
+
+// Add a chunk of the program's output to the page.
+function show(stream, chunk) {
+  if (!decoders.has(stream)) {
+    decoders.set(stream, new TextDecoder());
+  }
+  const text = decoders.get(stream).decode(chunk, { stream: true }).replace(ESCAPES, "");
+  if (text === "") {
+    return;
+  }
+
+  // Follow the output only if the reader is already at its end.
+  const atEnd =
+    outputElement.scrollHeight - outputElement.scrollTop - outputElement.clientHeight <
+    FOLLOW_SLACK_PX;
+  const span = document.createElement("span");
+  if (stream === Stream.STDERR) {
+    span.className = "stderr";
+  }
+  span.textContent = text;
+  outputElement.append(span);
+
+  while (outputElement.textContent.length > OUTPUT_LIMIT && outputElement.firstChild !== span) {
+    outputElement.firstChild.remove();
+  }
+  if (atEnd) {
+    outputElement.scrollTop = outputElement.scrollHeight;
+  }
+}
 
 const control = new WebSocket(new URL(CONTROL_URL, location.href).href.replace(/^http/, "ws"));
 control.binaryType = "arraybuffer";
@@ -89,6 +152,8 @@ function tell(type, fields = {}) {
 // reports the message and exits.
 function fatal(error) {
   const message = error?.stack ?? String(error);
+  setStatus(State.FAILED, "failed");
+  show(Stream.STDERR, new TextEncoder().encode(`\n${message}\n`));
   if (control.readyState === WebSocket.OPEN) {
     tell(ToSupervisor.ERROR, { message });
   }
@@ -421,6 +486,7 @@ async function watchPorts(vm) {
 // have room: the program's output stream is only read as fast as the
 // supervisor takes it.
 async function sendOutput(stream, chunk) {
+  show(stream, chunk);
   while (control.bufferedAmount > SEND_HIGH_WATER) {
     await new Promise((resolve) => setTimeout(resolve, SEND_POLL_MS));
   }
@@ -564,6 +630,10 @@ async function main() {
     fetch(INIT_URL).then((response) => response.arrayBuffer()),
   ]);
 
+  document.title = config.title;
+  titleElement.textContent = config.title;
+  setStatus(State.WAITING, "booting");
+
   // Init and the spec it reads, in a file system of their own.
   const bin = new MemoryFs();
   bin.writeFile(`/${INIT_NAME}`, new Uint8Array(init), { mode: EXECUTABLE });
@@ -584,8 +654,10 @@ async function main() {
 
   // The guest is up and the image is mounted: the container is created.
   guest = vm;
+  setStatus(State.WAITING, "created");
   tell(ToSupervisor.READY);
   await start;
+  setStatus(State.RUNNING, "running");
 
   if (config.mirrorPorts) {
     watchPorts(vm).catch((error) => tell(ToSupervisor.LOG, { message: `port watcher: ${error}` }));
@@ -607,6 +679,7 @@ async function main() {
 
   const status = await running;
   clearInterval(flush);
+  setStatus(State.EXITED, `exited (${status})`);
   tell(ToSupervisor.EXIT, { status });
 }
 
