@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/fzakaria/tabc/internal/engine"
+	"github.com/fzakaria/tabc/internal/supervisor"
 )
 
 // The API version this daemon claims, the oldest a client may speak,
@@ -239,7 +240,7 @@ func (s *Server) info(w http.ResponseWriter, _ *http.Request, _ []string) {
 		"OperatingSystem":   "tabc (containers in browser tabs)",
 		"OSType":            osType,
 		"Architecture":      "aarch64",
-		"NCPU":              1,
+		"NCPU":              supervisor.MostCPUs(),
 		"DefaultRuntime":    serverName,
 		"Runtimes":          map[string]any{serverName: map[string]string{"path": serverName}},
 		"Plugins":           map[string]any{"Network": []string{"bridge"}, "Volume": []string{"local"}},

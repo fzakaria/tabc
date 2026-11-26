@@ -14,7 +14,7 @@ import (
 // is the program's, flags included.
 func TestParseImageRun(t *testing.T) {
 	parsed, err := parseImageRun([]string{
-		"-it", "--rm", "-e", "A=1", "--env=B=2", "-w", "/srv", "--user=app", "-m", "512m",
+		"-it", "--rm", "-e", "A=1", "--env=B=2", "-w", "/srv", "--user=app", "-m", "512m", "--cpus", "1.5",
 		"alpine:3.22", "ls", "-la", "--color",
 	})
 	if err != nil {
@@ -28,6 +28,7 @@ func TestParseImageRun(t *testing.T) {
 		cwd:         "/srv",
 		user:        "app",
 		memory:      512 << 20,
+		cpus:        2,
 		image:       "alpine:3.22",
 		command:     []string{"ls", "-la", "--color"},
 	}
@@ -107,6 +108,23 @@ func TestParseVolume(t *testing.T) {
 	for _, text := range []string{dir, dir + ":data", dir + "/missing:/data", file + ":/data", ":/data"} {
 		if _, err := parseVolume(text); err == nil {
 			t.Errorf("parseVolume(%q) succeeded", text)
+		}
+	}
+}
+
+// TestParseCPUs checks that a count of CPUs, whole or with a fraction,
+// is read as the whole number of CPUs that holds the count, and that
+// text which is not a positive number is refused.
+func TestParseCPUs(t *testing.T) {
+	for text, want := range map[string]int{"1": 1, "4": 4, "1.5": 2, "0.5": 1, "2.0": 2} {
+		got, err := parseCPUs(text)
+		if err != nil || got != want {
+			t.Errorf("parseCPUs(%q) = %d, %v; want %d", text, got, err, want)
+		}
+	}
+	for _, text := range []string{"", "0", "-1", "two", "NaN", "Inf"} {
+		if _, err := parseCPUs(text); err == nil {
+			t.Errorf("parseCPUs(%q) succeeded", text)
 		}
 	}
 }

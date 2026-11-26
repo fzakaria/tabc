@@ -141,6 +141,20 @@ func (b *Bundle) MemoryLimit() int64 {
 	return *limit
 }
 
+// CPUs returns how many CPUs the configuration's quota of CPU time
+// comes to, or 0 when the configuration sets no quota.
+func (b *Bundle) CPUs() int {
+	linux := b.Spec.Linux
+	if linux == nil || linux.Resources == nil || linux.Resources.CPU == nil {
+		return 0
+	}
+	cpu := linux.Resources.CPU
+	if cpu.Quota == nil || cpu.Period == nil {
+		return 0
+	}
+	return plan.CPUs(*cpu.Quota, int64(*cpu.Period))
+}
+
 // GuestSpec returns what the guest's init needs to run the container's
 // program.
 func (b *Bundle) GuestSpec(network Network) guest.Spec {
@@ -266,6 +280,7 @@ func (b *Bundle) Plan() plan.Plan {
 		Cols:           int(cols),
 		Rows:           int(rows),
 		MemoryBytes:    b.MemoryLimit(),
+		CPUs:           b.CPUs(),
 		Volumes:        b.Volumes(),
 		Rootfs:         b.Rootfs,
 		ResolvConfPath: b.ResolvConfPath(),

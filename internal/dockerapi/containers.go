@@ -58,7 +58,12 @@ type createRequest struct {
 		PortBindings map[string][]portBinding
 		AutoRemove   bool
 		Memory       int64
-		Mounts       []struct {
+		// NanoCpus is `--cpus`, and CpuQuota of every CpuPeriod the
+		// older way to write the same limit.
+		NanoCpus  int64
+		CpuQuota  int64
+		CpuPeriod int64
+		Mounts    []struct {
 			Type     string
 			Source   string
 			Target   string
@@ -79,6 +84,24 @@ const (
 	portProtocol   = "/tcp"
 )
 
+// defaultCPUPeriod is the period, in microseconds, a quota of CPU time
+// is counted against when a request gives a quota and no period.
+const defaultCPUPeriod = 100_000
+
+// cpus returns how many CPUs a request asks for, 0 for no limit.
+func (request createRequest) cpus() int {
+	host := request.HostConfig
+	if host.NanoCpus > 0 {
+		return plan.CPUs(host.NanoCpus, plan.NanoCPU)
+	}
+
+	period := host.CpuPeriod
+	if period <= 0 {
+		period = defaultCPUPeriod
+	}
+	return plan.CPUs(host.CpuQuota, period)
+}
+
 // spec turns a request into the engine's description of a container.
 func (request createRequest) spec(name string) (engine.Spec, error) {
 	spec := engine.Spec{
@@ -93,6 +116,7 @@ func (request createRequest) spec(name string) (engine.Spec, error) {
 		OpenStdin:   request.OpenStdin,
 		StdinOnce:   request.StdinOnce,
 		MemoryBytes: request.HostConfig.Memory,
+		CPUs:        request.cpus(),
 		AutoRemove:  request.HostConfig.AutoRemove,
 		Networks:    map[string][]string{},
 	}
@@ -351,6 +375,7 @@ func (s *Server) containerInspect(w http.ResponseWriter, _ *http.Request, args [
 			"PortBindings":  bindings,
 			"AutoRemove":    spec.AutoRemove,
 			"Memory":        spec.MemoryBytes,
+			"NanoCpus":      int64(spec.CPUs) * plan.NanoCPU,
 			"RestartPolicy": map[string]any{"Name": "no", "MaximumRetryCount": 0},
 			"LogConfig":     map[string]any{"Type": "json-file", "Config": map[string]string{}},
 		},

@@ -143,9 +143,10 @@ func TestLoadErrors(t *testing.T) {
 
 // TestTerminalAndLimits checks the two settings the supervisor reads
 // besides the program: whether a terminal is wanted and at what size,
-// and the memory limit.
+// the memory limit, and the CPUs a quota of CPU time comes to.
 func TestTerminalAndLimits(t *testing.T) {
 	limit := int64(512 << 20)
+	quota, period := int64(250000), uint64(100000)
 	dir := writeBundle(t, specs.Spec{
 		Process: &specs.Process{
 			Args:        []string{"sh"},
@@ -153,7 +154,10 @@ func TestTerminalAndLimits(t *testing.T) {
 			ConsoleSize: &specs.Box{Width: 120, Height: 40},
 		},
 		Linux: &specs.Linux{
-			Resources:  &specs.LinuxResources{Memory: &specs.LinuxMemory{Limit: &limit}},
+			Resources: &specs.LinuxResources{
+				Memory: &specs.LinuxMemory{Limit: &limit},
+				CPU:    &specs.LinuxCPU{Quota: &quota, Period: &period},
+			},
 			Namespaces: []specs.LinuxNamespace{{Type: specs.NetworkNamespace, Path: "/run/netns/x"}},
 		},
 	})
@@ -168,6 +172,9 @@ func TestTerminalAndLimits(t *testing.T) {
 	}
 	if b.MemoryLimit() != limit {
 		t.Errorf("memory limit %d", b.MemoryLimit())
+	}
+	if b.CPUs() != 3 {
+		t.Errorf("%d CPUs", b.CPUs())
 	}
 	if path, wanted := b.NetworkNamespace(); !wanted || path != "/run/netns/x" {
 		t.Errorf("network namespace %q, wanted %v", path, wanted)

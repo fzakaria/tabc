@@ -70,6 +70,9 @@ type Plan struct {
 	// MemoryBytes is the container's memory limit, 0 for none.
 	MemoryBytes int64 `json:"memoryBytes,omitempty"`
 
+	// CPUs is how many CPUs the container asked for, 0 for no limit.
+	CPUs int `json:"cpus,omitempty"`
+
 	// The root file system: a directory on the host, or an image's
 	// layers as uncompressed tar files, lowest first. One or the other.
 	Rootfs string   `json:"rootfs,omitempty"`
@@ -144,4 +147,18 @@ func Load(dir string) (Plan, error) {
 	}
 	err = json.Unmarshal(data, &p)
 	return p, err
+}
+
+// NanoCPU is one CPU in the unit the Docker API counts CPUs in.
+const NanoCPU = 1_000_000_000
+
+// CPUs returns how many CPUs a limit on CPU time comes to: part of
+// every whole, rounded up, since a guest has a whole number of CPUs.
+// The pair is a quota and its period, or a count of NanoCPU and
+// NanoCPU. A part or a whole that is not positive is no limit, 0.
+func CPUs(part, whole int64) int {
+	if part <= 0 || whole <= 0 {
+		return 0
+	}
+	return int((part + whole - 1) / whole)
 }

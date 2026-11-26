@@ -19,6 +19,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -73,6 +74,17 @@ const (
 	minMemoryMiB     = 128
 	maxMemoryMiB     = 8192
 	bytesPerMiB      = 1 << 20
+)
+
+// The guest's CPUs: what a container gets when its configuration asks
+// for none, and the most the SDK's kernel boots (NR_CPUS in unkernel's
+// kw_smp.config). Each guest CPU is a thread of the browser. A second
+// CPU adds about 400 ms to a start of about 900 ms and nearly halves
+// the time of work that is two wide; CPUs after the second add less of
+// either, so two is the default and more are asked for.
+const (
+	defaultCPUs = 2
+	maxCPUs     = 16
 )
 
 // The terminal the program is told it has, and the size of one whose
@@ -256,6 +268,7 @@ func run(options Options, dir string, logger *log.Logger, logFile *os.File) (int
 			Term:        terminalType,
 			Title:       orTitle(planned.Title, options.ID),
 			MemoryMiB:   memoryMiB(planned.MemoryBytes),
+			CPUs:        guestCPUs(planned.CPUs, runtime.NumCPU()),
 			Network:     true,
 			MirrorPorts: options.MirrorPorts,
 			Volumes:     mounted,
@@ -655,4 +668,22 @@ func networkNames(networks []plan.Network) []string {
 		names = append(names, network.Name)
 	}
 	return names
+}
+
+// guestCPUs returns how many CPUs the guest boots with for the count a
+// container asked for, 0 meaning none was asked for, on a host with
+// some number of threads. A guest CPU whose thread the host deschedules
+// stalls the CPUs that wait for the descheduled one, so the guest never
+// gets more CPUs than the host has threads.
+func guestCPUs(asked, threads int) int {
+	if asked <= 0 {
+		asked = defaultCPUs
+	}
+	return max(min(asked, threads, maxCPUs), 1)
+}
+
+// MostCPUs returns the most CPUs a guest on this host can be given,
+// which is what an engine reports the host as having.
+func MostCPUs() int {
+	return guestCPUs(maxCPUs, runtime.NumCPU())
 }

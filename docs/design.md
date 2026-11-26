@@ -9,7 +9,7 @@ why each is where it is.
 | ---------- | --------------------- | -------------------------------------------------------------------- |
 | `tabc`     | `cmd/tabc`            | the commands an engine calls, each over in a moment                  |
 | supervisor | `internal/supervisor` | one per container; owns the browser, serves the page, carries stdio  |
-| page       | `page/`               | boots the guest and runs the program                                 |
+| page       | `page/`               | boots the guest in a worker, runs the program, shows a terminal      |
 | guest      | [unkernel]            | Linux compiled to WebAssembly, with an emulator for aarch64 programs |
 | init       | `cmd/tabc-init`       | first program in the guest; builds the root, becomes the user, execs |
 
@@ -116,6 +116,27 @@ sends the controlling end to the engine over the console socket, puts
 the other end in raw mode and copies bytes. A size the engine sets is
 noticed by polling and passed to the guest.
 
+## CPUs
+
+The guest has two CPUs unless the container asks for a count: `--cpus`,
+or a quota of CPU time in the bundle, rounded up to whole CPUs, and
+never more than the host has threads or the kernel's 16. A limit below
+one CPU is one CPU; nothing throttles the guest.
+
+unkernel runs each CPU after the first in a Web Worker on shared
+memory, and a CPU blocks while it waits for another, which a browser
+allows in a worker and never on a page's main thread. So the guest and
+everything that talks to the supervisor live in a worker of the page
+(`page/guest.js`), and the page itself (`page/main.js`) only draws: the
+name, the state, the terminal. The SDK can put the kernel in a worker
+on its own, but then the network has to be one the SDK builds there,
+and this guest's network is the supervisor.
+
+A second CPU costs start-up time: `echo hi` goes from 0.9 s to 1.3 s on
+a Ryzen laptop and from 0.45 s to 0.8 s on an M4. Four shells counting
+at once take 35 s on one CPU, 22 s on two and 18 s on four on the
+laptop, and 22 s, 13 s and 7 s on the M4.
+
 ## A page you can see
 
 By default the supervisor starts a headless Chromium nobody sees. With
@@ -180,7 +201,7 @@ that goes away takes its program with it.
 
 ## What is missing
 
-UDP, CPU limits, checkpointing, building images without Docker.
+UDP, a CPU limit that throttles, checkpointing, building images without Docker.
 x86-64 images, since the guest runs aarch64.
 
 [unkernel]: https://github.com/pithings/unkernel

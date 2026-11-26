@@ -55,7 +55,9 @@ type pageConfig struct {
 	// Title is what the page calls the container.
 	Title     string `json:"title"`
 	MemoryMiB int    `json:"memoryMiB"`
-	Network   bool   `json:"network"`
+	// CPUs is how many CPUs the guest boots with.
+	CPUs    int  `json:"cpus"`
+	Network bool `json:"network"`
 	// MirrorPorts has the page watch which ports the program opens.
 	MirrorPorts bool `json:"mirrorPorts"`
 	// Volumes are where in the guest the page mounts each volume, and

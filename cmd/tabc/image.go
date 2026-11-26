@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"math"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -58,6 +59,7 @@ type imageRun struct {
 	cwd         string
 	user        string
 	memory      int64
+	cpus        int
 	publish     []plan.Publish
 	volumes     []plan.Volume
 	name        string
@@ -151,6 +153,12 @@ func parseImageRun(args []string) (imageRun, error) {
 			if err == nil {
 				parsed.memory, err = parseMemory(text)
 			}
+		case "--cpus":
+			var text string
+			text, err = value(name, inline, hasInline)
+			if err == nil {
+				parsed.cpus, err = parseCPUs(text)
+			}
 		default:
 			err = fmt.Errorf("unknown flag %s", arg)
 		}
@@ -158,7 +166,7 @@ func parseImageRun(args []string) (imageRun, error) {
 			return parsed, err
 		}
 	}
-	return parsed, errors.New("usage: tabc run [-it] [--open | --link] [--pull] [--name name] [--network network] [-p [address:]host:container] [-v directory:/path[:ro]] [-e NAME=value] [-w dir] [-u user] [-m memory] <image> [program...]")
+	return parsed, errors.New("usage: tabc run [-it] [--open | --link] [--pull] [--name name] [--network network] [-p [address:]host:container] [-v directory:/path[:ro]] [-e NAME=value] [-w dir] [-u user] [-m memory] [--cpus count] <image> [program...]")
 }
 
 // parsePublish reads a published port as `docker run -p` writes one:
@@ -238,6 +246,17 @@ func parseMemory(text string) (int64, error) {
 	return amount * unit, nil
 }
 
+// parseCPUs reads a count of CPUs as `docker run --cpus` takes one, a
+// number that may have a fraction, and returns the whole number of
+// CPUs that holds the count.
+func parseCPUs(text string) (int, error) {
+	count, err := strconv.ParseFloat(text, 64)
+	if err != nil || math.IsNaN(count) || math.IsInf(count, 0) || count <= 0 {
+		return 0, fmt.Errorf("CPU count %q is not a positive number", text)
+	}
+	return int(math.Ceil(count)), nil
+}
+
 // runImage pulls an image and runs a program from it, and returns the
 // program's status.
 func runImage(args []string) (int, error) {
@@ -280,6 +299,7 @@ func runImage(args []string) (int, error) {
 		Spec:        spec,
 		Terminal:    plan.TerminalNone,
 		MemoryBytes: parsed.memory,
+		CPUs:        parsed.cpus,
 		Layers:      pulled.Layers,
 		Publish:     parsed.publish,
 		Volumes:     parsed.volumes,

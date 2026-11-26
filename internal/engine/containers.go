@@ -83,9 +83,11 @@ type Spec struct {
 	StdinOnce bool
 
 	MemoryBytes int64
-	AutoRemove  bool
-	Publish     []plan.Publish
-	Mounts      []Mount
+	// CPUs is how many CPUs the container asked for, 0 for no limit.
+	CPUs       int
+	AutoRemove bool
+	Publish    []plan.Publish
+	Mounts     []Mount
 
 	// Networks are the networks the container is on, each with the
 	// extra names the container goes by there.
@@ -462,6 +464,7 @@ func (e *Engine) plan(c *Container) (plan.Plan, error) {
 		Spec:        guestSpec,
 		Terminal:    plan.TerminalNone,
 		MemoryBytes: spec.MemoryBytes,
+		CPUs:        spec.CPUs,
 		Layers:      pulled.Layers,
 		Publish:     spec.Publish,
 		Browser:     e.config.Browser,

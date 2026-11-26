@@ -50,6 +50,19 @@ pkgs.runCommand "tabc-e2e"
     echo "the guest is its own machine"
     test "$(run machine uname -m < /dev/null)" = aarch64
 
+    # A quota of two CPUs' time is a guest with two CPUs, where the
+    # machine that builds this has two threads to give.
+    echo "CPUs"
+    mkdir -p bundles/cpus
+    ln -s ${bundle}/rootfs bundles/cpus/rootfs
+    jq '.process.args = ["nproc"] | .linux.resources.cpu = {quota: 200000, period: 100000}' \
+      < ${bundle}/config.json > bundles/cpus/config.json
+    wanted=2
+    if [ "$(nproc)" -lt 2 ]; then
+      wanted=1
+    fi
+    test "$(tabc --root "$PWD/state" run --bundle bundles/cpus cpus < /dev/null)" = "$wanted"
+
     # A second program in a container that is running. The container's
     # own program leaves a file and waits; each exec is checked the way
     # a container's program was above.
