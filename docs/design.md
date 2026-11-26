@@ -157,9 +157,30 @@ are the ones the web already leans on.
 A container in a browser somebody opened has fewer walls: the browser
 is the user's own, with their profile, on the host's network.
 
+## A second program
+
+`tabc exec` runs a program in a container that is already running. The
+guest is reachable only through the page, so the request goes the way
+a connection into the guest does: the command asks the supervisor over
+the control socket, the supervisor asks the page, the page spawns init
+with `--exec`, and answers on a WebSocket of its own.
+
+Init does not build a root this time. The first init left the
+container's root mounted where the whole guest can see it, and a file
+that marks it finished. The second init waits for the file, enters the
+same root, becomes the user and execs. There is no namespace to join:
+the guest holds one container.
+
+The control socket's connection stays open for the program's life and
+carries its input, output and exit status as frames. The command that
+asked is the program's process on the host. An engine passes
+`--detach`, and then a child of the command stays in its place, named
+in the pid file, so the engine has a process to wait on. A command
+that goes away takes its program with it.
+
 ## What is missing
 
-`exec`, UDP, CPU limits, checkpointing, building images without
-Docker. x86-64 images, since the guest runs aarch64.
+UDP, CPU limits, checkpointing, building images without Docker.
+x86-64 images, since the guest runs aarch64.
 
 [unkernel]: https://github.com/pithings/unkernel

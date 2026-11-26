@@ -98,6 +98,7 @@ Compose included.
 ```console
 $ nix run github:fzakaria/tabc#tocker -- run -it alpine sh
 $ tocker compose up
+$ tocker exec -it work-web-1 sh   # a shell beside a running program
 $ tocker --dashboard compose up   # every service as a pane in one page
 $ tocker --stop                   # stop the daemon and its containers
 ```
@@ -125,6 +126,9 @@ Then name it per container:
 ```console
 $ docker run --rm -it --runtime tabc --platform linux/arm64 debian bash
 ```
+
+`docker exec` works on a container started this way, as it does on any
+other.
 
 For Compose the runtime is a line on each service, not a flag to
 `docker compose up`:
@@ -171,8 +175,8 @@ status, its stdio. [docs/design.md](docs/design.md) has the details.
 - Programs run 11 to 36 times slower than under runc, since they are
   emulated. Starting is fast; a long computation is not.
 - Each container is a whole browser: about 540 MiB of memory when idle.
-- No `docker exec`, no UDP, no image builds on a Mac. Memory is the
-  only limit that is applied.
+- No UDP, no image builds on a Mac. Memory is the only limit that is
+  applied.
 - A container you open in your own browser is behind a thinner wall
   than one in the hidden browser tabc starts.
 - The kernel in the tab is young. Treat this as an experiment, not as
