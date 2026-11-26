@@ -116,7 +116,7 @@ func startSupervisor(l Launch, record *state.Container) (*exec.Cmd, error) {
 	self := l.Self
 	if self == "" {
 		var err error
-		self, err = os.Executable()
+		self, err = Self()
 		if err != nil {
 			return nil, err
 		}
@@ -185,6 +185,20 @@ func startSupervisor(l Launch, record *state.Container) (*exec.Cmd, error) {
 		return nil, fmt.Errorf("the supervisor exited without a word (%v)", err)
 	}
 	return nil, errors.New(answer)
+}
+
+// Self returns the tabc binary this process is, as a path to the file
+// and not to a link to it. The binary is also installed under the name
+// tocker, a link, and what it does depends on the name it is run under:
+// a supervisor or a daemon started through the link would be tocker
+// again, starting another. Linux names the file itself; macOS names
+// whatever path the process was started by.
+func Self() (string, error) {
+	executable, err := os.Executable()
+	if err != nil {
+		return "", err
+	}
+	return filepath.EvalSymlinks(executable)
 }
 
 // orFile returns file unless it is nil.

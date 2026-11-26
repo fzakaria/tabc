@@ -9,6 +9,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/fzakaria/tabc/internal/runner"
 	"github.com/fzakaria/tabc/internal/state"
 	"github.com/fzakaria/tabc/internal/supervisor"
 )
@@ -44,6 +45,10 @@ const (
 	envDockerHost = "DOCKER_HOST"
 	dockerProgram = "docker"
 )
+
+// envDaemonChild marks the process tocker starts as the daemon, so that
+// process can tell if it has come up as tocker instead.
+const envDaemonChild = "TABC_DAEMON_CHILD"
 
 // dockerBuilt is the docker program the package that built tabc pins
 // (nix/package.nix), empty in a plain `go build`.
@@ -125,7 +130,14 @@ func dockerPath() (string, error) {
 // startDaemon starts a daemon that outlives this command and waits for
 // it to answer.
 func startDaemon(withDashboard bool) (daemonRecord, error) {
-	self, err := os.Executable()
+	// A process started by this function that finds itself here was
+	// meant to be the daemon and is tocker instead. Starting another
+	// would never end: each would start the next.
+	if os.Getenv(envDaemonChild) != "" {
+		return daemonRecord{}, errors.New("tocker was started in place of the tabc daemon; this is a bug in how tabc finds its own binary")
+	}
+
+	self, err := runner.Self()
 	if err != nil {
 		return daemonRecord{}, err
 	}
@@ -144,6 +156,7 @@ func startDaemon(withDashboard bool) (daemonRecord, error) {
 		args = append(args, flagDashboard)
 	}
 	process := exec.Command(self, args...)
+	process.Env = append(os.Environ(), envDaemonChild+"=1")
 	process.Stdout = logFile
 	process.Stderr = logFile
 	process.SysProcAttr = &syscall.SysProcAttr{Setsid: true}

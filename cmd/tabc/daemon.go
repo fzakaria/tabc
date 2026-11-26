@@ -18,6 +18,7 @@ import (
 	"github.com/fzakaria/tabc/internal/engine"
 	"github.com/fzakaria/tabc/internal/image"
 	"github.com/fzakaria/tabc/internal/plan"
+	"github.com/fzakaria/tabc/internal/runner"
 	"github.com/fzakaria/tabc/internal/state"
 )
 
@@ -86,6 +87,10 @@ func readDaemon() (daemonRecord, bool) {
 
 // daemon runs the daemon until it is told to stop.
 func daemon(args []string) error {
+	// The mark tocker put on this process has done its job, and is not
+	// for the supervisors this daemon starts.
+	os.Unsetenv(envDaemonChild)
+
 	socket, info := daemonPaths()
 	withDashboard, open := false, true
 	for index := 0; index < len(args); index++ {
@@ -116,7 +121,7 @@ func daemon(args []string) error {
 	if err != nil {
 		return err
 	}
-	self, err := os.Executable()
+	self, err := runner.Self()
 	if err != nil {
 		return err
 	}
