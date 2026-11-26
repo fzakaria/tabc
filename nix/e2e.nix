@@ -63,6 +63,11 @@ pkgs.runCommand "tabc-e2e"
     fi
     test "$(tabc --root "$PWD/state" run --bundle bundles/cpus cpus < /dev/null)" = "$wanted"
 
+    # The guest's kernel is booted to end an RCU grace period at once,
+    # and the kernel reports as much in /sys.
+    echo "expedited grace periods"
+    test "$(run expedited cat /sys/kernel/rcu_expedited < /dev/null)" = 1
+
     # A second program in a container that is running. The container's
     # own program leaves a file and waits; each exec is checked the way
     # a container's program was above.

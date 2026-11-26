@@ -66,6 +66,14 @@ const SINGLE_CPU = 1;
 const KERNEL_ONE_CPU_URL = "unkernel/unkernel.wasm";
 const KERNEL_SMP_URL = "unkernel/unkernel-smp.wasm";
 
+// The guest kernel's command line: the SDK's own, and one parameter
+// more. Linux waits out an RCU grace period, tens of milliseconds once
+// a second CPU is up, in calls such as closing a packet socket, and the
+// guest's DHCP client at boot makes six of them: 190 ms before the
+// first program can start. The parameter has the kernel interrupt the
+// other CPUs and end the grace period at once.
+const KERNEL_CMDLINE = "console=hvc0 rdinit=/init rcupdate.rcu_expedited=1";
+
 // The first byte of a binary message says which stream its bytes are.
 const Stream = Object.freeze({
   STDIN: 0,
@@ -853,6 +861,7 @@ async function main() {
   tell(ToSupervisor.LOG, { message: `booting the kernel, ${cpus} CPUs` });
   const vm = await createKernel({
     kernel: new URL(cpus > SINGLE_CPU ? KERNEL_SMP_URL : KERNEL_ONE_CPU_URL, location.href).href,
+    cmdline: KERNEL_CMDLINE,
     memoryMiB: config.memoryMiB,
     cpus,
     ...(config.network ? { net: supervisorNet() } : {}),

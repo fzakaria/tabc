@@ -138,14 +138,20 @@ on its own, but then the network has to be one the SDK builds there,
 and this guest's network is the supervisor.
 
 A second CPU costs start-up time: `echo hi` takes 0.9 s on one CPU and
-1.1 s on two on a Ryzen laptop. Four shells counting at once take 35 s
+1.0 s on two on a Ryzen laptop. Four shells counting at once take 35 s
 on one CPU, 22 s on two and 18 s on four on the laptop, and 22 s, 13 s
 and 7 s on an M4.
 
+Two things keep that cost to a tenth of a second, where it was 0.4 s.
 The SDK carries the several-CPU kernel as a binary difference from the
 one-CPU kernel and applies the difference in the page at every boot,
-150 ms. tabc's build applies the difference once (`nix/unkernel.nix`)
-and the page loads the result.
+150 ms; tabc's build applies the difference once (`nix/unkernel.nix`)
+and the page loads the result. And the guest boots with
+`rcupdate.rcu_expedited=1`: its DHCP client at boot closes and binds
+packet sockets, each call waits out an RCU grace period once a second
+CPU is up, and the six calls took 190 ms. With the parameter a busy
+guest ran no slower: forks, short connections, a 100 MB download and
+installing packages were each within 6% either way on two CPUs.
 
 ## A page you can see
 
