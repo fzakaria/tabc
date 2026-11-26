@@ -1,0 +1,140 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>tabc</title>
+    <style>
+      /* Every container the daemon runs, each in a pane of its own.
+         A pane is the container: the page in its frame boots the
+         guest, so a container exists for as long as this page is open.
+         One page with many panes, and not many tabs, because a browser
+         slows the tabs nobody is looking at. */
+      :root {
+        --ground: #0f1115;
+        --pane: #16181d;
+        --bar: #20232b;
+        --ink: #d7dae0;
+        --muted: #8b91a0;
+        --accent: #e06c4f;
+        --running: #5fb878;
+        --waiting: #d9a441;
+        --exited: #8b91a0;
+        color-scheme: dark;
+      }
+      html,
+      body {
+        height: 100%;
+        margin: 0;
+      }
+      body {
+        display: flex;
+        flex-direction: column;
+        background: var(--ground);
+        color: var(--ink);
+        font:
+          13px/1.45 ui-monospace,
+          SFMono-Regular,
+          Menlo,
+          Consolas,
+          monospace;
+      }
+      body > header {
+        display: flex;
+        gap: 1rem;
+        align-items: baseline;
+        padding: 0.6rem 1rem;
+      }
+      h1 {
+        margin: 0;
+        font-size: 15px;
+        color: var(--accent);
+      }
+      #summary {
+        color: var(--muted);
+      }
+      #panes {
+        flex: 1;
+        min-height: 0;
+        display: grid;
+        gap: 0.6rem;
+        padding: 0 0.6rem 0.6rem;
+        grid-template-columns: repeat(auto-fit, minmax(26rem, 1fr));
+        grid-auto-rows: minmax(15rem, 1fr);
+      }
+      #empty {
+        margin: auto;
+        color: var(--muted);
+        text-align: center;
+        line-height: 1.9;
+      }
+      section {
+        display: flex;
+        flex-direction: column;
+        min-height: 0;
+        background: var(--pane);
+        border: 1px solid var(--bar);
+        border-radius: 6px;
+        overflow: hidden;
+      }
+      section > header {
+        display: flex;
+        gap: 0.75rem;
+        align-items: baseline;
+        padding: 0.4rem 0.7rem;
+        background: var(--bar);
+        white-space: nowrap;
+      }
+      .name {
+        font-weight: 600;
+      }
+      .image {
+        color: var(--muted);
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .ports a {
+        color: var(--accent);
+        margin-right: 0.5rem;
+      }
+      .status {
+        margin-left: auto;
+        color: var(--muted);
+      }
+      .status::before {
+        content: "";
+        display: inline-block;
+        width: 0.6em;
+        height: 0.6em;
+        margin-right: 0.45em;
+        border-radius: 50%;
+        background: var(--waiting);
+      }
+      .status[data-state="running"]::before {
+        background: var(--running);
+      }
+      .status[data-state="exited"]::before {
+        background: var(--exited);
+      }
+      iframe {
+        flex: 1;
+        min-height: 0;
+        border: 0;
+        background: var(--pane);
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>tabc</h1>
+      <span id="summary">no containers</span>
+    </header>
+    <main id="panes">
+      <p id="empty">
+        No containers yet.<br />
+        Start one with <code>tocker run alpine echo hi</code>, or <code>tocker compose up</code>.
+      </p>
+    </main>
+    <script type="module" src="dashboard.js"></script>
+  </body>
+</html>
