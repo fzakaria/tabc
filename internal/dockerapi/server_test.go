@@ -30,3 +30,32 @@ func TestMatch(t *testing.T) {
 		}
 	}
 }
+
+// TestExecRoutes checks that the four requests the Docker command line
+// makes for `exec` each have an answer, by looking every one up in the
+// routes the way a request is.
+func TestExecRoutes(t *testing.T) {
+	requests := []struct {
+		method string
+		path   []string
+	}{
+		{"POST", []string{"containers", "abc", "exec"}},
+		{"POST", []string{"exec", "def", "start"}},
+		{"POST", []string{"exec", "def", "resize"}},
+		{"GET", []string{"exec", "def", "json"}},
+	}
+	for _, request := range requests {
+		found := false
+		for _, candidate := range routes {
+			if candidate.method != request.method {
+				continue
+			}
+			if _, ok := match(candidate.pattern, request.path); ok {
+				found = true
+			}
+		}
+		if !found {
+			t.Errorf("no route for %s %v", request.method, request.path)
+		}
+	}
+}

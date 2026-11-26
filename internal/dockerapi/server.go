@@ -83,6 +83,11 @@ var routes = []route{
 	{http.MethodGet, []string{"containers", "*", "logs"}, (*Server).containerLogs},
 	{http.MethodDelete, []string{"containers", "*"}, (*Server).containerRemove},
 
+	{http.MethodPost, []string{"containers", "*", "exec"}, (*Server).execCreate},
+	{http.MethodPost, []string{"exec", "*", "start"}, (*Server).execStart},
+	{http.MethodPost, []string{"exec", "*", "resize"}, (*Server).execResize},
+	{http.MethodGet, []string{"exec", "*", "json"}, (*Server).execInspect},
+
 	{http.MethodGet, []string{"networks"}, (*Server).networkList},
 	{http.MethodPost, []string{"networks", "create"}, (*Server).networkCreate},
 	{http.MethodGet, []string{"networks", "*"}, (*Server).networkInspect},

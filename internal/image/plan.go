@@ -135,6 +135,13 @@ func hasPath(env []string) bool {
 	return false
 }
 
+// ResolveUser turns a user as a person writes one into numbers, with
+// names looked up in an image's files: what a second program in a
+// container is run as (tabc exec).
+func ResolveUser(user string, tree rootfs.Tree) (uid, gid uint32, err error) {
+	return resolveUser(user, tree)
+}
+
 // resolveUser turns an image's user, "name", "uid", "name:group" or
 // "uid:gid", into numbers. A name is looked up in the image's own
 // passwd and group files. No user is the superuser.

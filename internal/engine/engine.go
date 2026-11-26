@@ -75,6 +75,8 @@ type Engine struct {
 	containers map[string]*Container
 	networks   map[string]*Network
 	volumes    map[string]*Volume
+	// execs are the second programs asked for, by id (execs.go).
+	execs map[string]*Exec
 
 	events *events
 }
@@ -87,6 +89,7 @@ func New(config Config) *Engine {
 		containers: map[string]*Container{},
 		networks:   map[string]*Network{},
 		volumes:    map[string]*Volume{},
+		execs:      map[string]*Exec{},
 		events:     newEvents(),
 	}
 	for _, name := range builtinNetworks {
