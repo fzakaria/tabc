@@ -49,6 +49,13 @@ const ROOT = "/";
 // so the SDK's request timeout is off: a slow disk is not an error.
 const NO_TIMEOUT = 0;
 
+// A connection's count of bytes the guest has taken, as the supervisor
+// reads one (internal/supervisor, netAck), and how many bytes are taken
+// between two counts: a sixteenth of the supervisor's window of 4 MiB,
+// so the window is never close to used up by bytes not yet counted.
+const NET_ACK = "ack";
+const NET_ACK_BYTES = 256 << 10;
+
 // What a guest gets on a page with no shared memory for more CPUs.
 const SINGLE_CPU = 1;
 
@@ -311,6 +318,24 @@ function supervisorNet() {
       let closed = false;
       let draining = false;
 
+      // Hand the guest's stack a chunk of the peer's bytes, and tell
+      // the supervisor how much the stack has taken. The supervisor
+      // stops reading from the peer once a window of bytes is on its
+      // way and not yet taken, so a peer cannot fill the page faster
+      // than the guest reads, and without the count the supervisor
+      // would stop for good after one window. The count is sent every
+      // NET_ACK_BYTES and not with each chunk.
+      let taken = 0;
+      const deliver = (data) => {
+        events.onData(data);
+        taken += data.length;
+        if (taken < NET_ACK_BYTES || socket.readyState !== WebSocket.OPEN) {
+          return;
+        }
+        socket.send(JSON.stringify({ t: NET_ACK, n: taken }));
+        taken = 0;
+      };
+
       const close = (error) => {
         if (closed) {
           return;
@@ -340,7 +365,7 @@ function supervisorNet() {
           held.push(data);
           return;
         }
-        events.onData(data);
+        deliver(data);
       };
       socket.onclose = () => close(null);
       socket.onerror = () => close(new Error(`connection to ${host}:${port} failed`));
@@ -385,10 +410,10 @@ function supervisorNet() {
         },
         resume() {
           paused = false;
-          const waiting = held;
-          held = [];
-          for (const data of waiting) {
-            events.onData(data);
+          // The stack may ask for a pause again partway through what
+          // was held, and the rest then waits for the next resume.
+          while (!paused && held.length > 0) {
+            deliver(held.shift());
           }
         },
         get buffered() {

@@ -72,6 +72,11 @@ Connections then leave from the container's address, a container with
 no network reaches nothing, and the browser itself is on no other
 network.
 
+The supervisor reads from a peer only while less than 4 MiB is on its
+way to a guest that has not taken it, and the page reports what the
+guest takes. On a laptop, to a server on the same machine, a guest
+downloads at about 200 MB/s and uploads at about 50 MB/s.
+
 Only TCP and name lookups are carried. There is no UDP.
 
 ### Connections in
