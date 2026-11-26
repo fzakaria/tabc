@@ -1,0 +1,25 @@
+# Two containers, each in a browser tab of its own: a web server and the
+# Redis it keeps a counter in.
+#
+#   docker compose up
+#   curl localhost:8000
+#
+# `runtime: tabc` is the only line that is not ordinary Compose. The
+# guest is aarch64 on every host, hence the platform.
+services:
+  web:
+    image: python:3.13-alpine
+    runtime: tabc
+    platform: linux/arm64
+    command: ["python", "/app/app.py"]
+    volumes:
+      - ./app.py:/app/app.py:ro
+    ports:
+      - "8000:8000"
+    depends_on:
+      - redis
+
+  redis:
+    image: redis:alpine
+    runtime: tabc
+    platform: linux/arm64
