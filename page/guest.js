@@ -59,6 +59,13 @@ const NET_ACK_BYTES = 256 << 10;
 // What a guest gets on a page with no shared memory for more CPUs.
 const SINGLE_CPU = 1;
 
+// The kernel as the SDK ships it, built for one CPU, and the kernel for
+// several CPUs. The SDK can make the second from the first in the page,
+// and takes about 150 ms of every start to do so; tabc's build makes
+// the several-CPU kernel once instead.
+const KERNEL_ONE_CPU_URL = "unkernel/unkernel.wasm";
+const KERNEL_SMP_URL = "unkernel/unkernel-smp.wasm";
+
 // The first byte of a binary message says which stream its bytes are.
 const Stream = Object.freeze({
   STDIN: 0,
@@ -845,7 +852,7 @@ async function main() {
   // The log's timestamps are how a start-up's time is accounted for.
   tell(ToSupervisor.LOG, { message: `booting the kernel, ${cpus} CPUs` });
   const vm = await createKernel({
-    kernel: new URL("unkernel/unkernel.wasm", location.href).href,
+    kernel: new URL(cpus > SINGLE_CPU ? KERNEL_SMP_URL : KERNEL_ONE_CPU_URL, location.href).href,
     memoryMiB: config.memoryMiB,
     cpus,
     ...(config.network ? { net: supervisorNet() } : {}),

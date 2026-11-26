@@ -137,10 +137,15 @@ name, the state, the terminal. The SDK can put the kernel in a worker
 on its own, but then the network has to be one the SDK builds there,
 and this guest's network is the supervisor.
 
-A second CPU costs start-up time: `echo hi` goes from 0.9 s to 1.3 s on
-a Ryzen laptop and from 0.45 s to 0.8 s on an M4. Four shells counting
-at once take 35 s on one CPU, 22 s on two and 18 s on four on the
-laptop, and 22 s, 13 s and 7 s on the M4.
+A second CPU costs start-up time: `echo hi` takes 0.9 s on one CPU and
+1.1 s on two on a Ryzen laptop. Four shells counting at once take 35 s
+on one CPU, 22 s on two and 18 s on four on the laptop, and 22 s, 13 s
+and 7 s on an M4.
+
+The SDK carries the several-CPU kernel as a binary difference from the
+one-CPU kernel and applies the difference in the page at every boot,
+150 ms. tabc's build applies the difference once (`nix/unkernel.nix`)
+and the page loads the result.
 
 ## A page you can see
 
