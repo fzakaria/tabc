@@ -23,12 +23,18 @@ $ tabc run -it alpine sh
 Linux aarch64
 ```
 
+And so does Compose, with every service in a tab of its own:
+
+```console
+$ tocker compose up
+```
+
+![Two panes in one browser page: Redis starting in one, a web server logging requests in the other](docs/img/dashboard.webp)
+
 A container starts in under a second: 0.87 s on a Ryzen laptop, 0.44 s
 on an M4.
 
 ## Install
-
-tabc is one file. It needs Chromium or Chrome on the machine.
 
 With Nix, on Linux or an Apple Silicon Mac:
 
@@ -37,23 +43,65 @@ $ nix run github:fzakaria/tabc -- run alpine echo hi
 hi
 ```
 
-On Linux the Nix package brings its own Chromium. On a Mac tabc looks
-for Chrome in `/Applications`; set `TABC_CHROMIUM` to use another.
+tabc is one file, and `tocker` is the same file under another name. On
+Linux the Nix package brings its own Chromium. On a Mac tabc looks for
+Chrome in `/Applications`, or set `TABC_CHROMIUM`. With `--open` any
+recent browser will do and none has to be installed.
 
 ## Use
 
-By itself. tabc pulls the image and runs it. The flags are the ones you
-know from `docker run`: `-i`, `-t`, `-e`, `-w`, `-u`, `-m`.
+### On its own
+
+tabc pulls the image and runs it. The flags are the ones you know from
+`docker run`.
 
 ```console
 $ tabc run python:3.13-alpine python -c 'print(6 * 7)'
 42
 $ echo hello | tabc run -i alpine tr a-z A-Z
 HELLO
+$ tabc run -p 8080:80 nginx:alpine          # then curl localhost:8080
+$ tabc run -v "$PWD":/work -w /work alpine ls
 ```
 
-With Docker. Register the runtime in `/etc/docker/daemon.json` and
-restart the daemon:
+| flag                   | what it does                                    |
+| ---------------------- | ----------------------------------------------- |
+| `-i`, `-t`             | keep stdin open, give the program a terminal    |
+| `-e`, `-w`, `-u`, `-m` | environment, directory, user, memory            |
+| `-p host:container`    | publish a port, on loopback unless you say      |
+| `-v dir:/path[:ro]`    | mount a directory, live and writable            |
+| `--name`, `--network`  | let containers find each other by name          |
+| `--open`, `--link`     | run in your own browser instead of a hidden one |
+
+### In your browser
+
+```console
+$ tabc run -it --open alpine sh
+```
+
+The container opens as a tab you can see, with a terminal in it. Type
+in the tab or in the terminal you started it from; each shows the
+other. `--link` prints the address and waits for you to open it.
+
+### Compose, with no Docker
+
+`tocker` is the Docker command line pointed at tabc. It starts a small
+daemon of tabc's own and then becomes the real `docker`, so every
+command you know works, Compose included.
+
+```console
+$ tocker run -it alpine sh
+$ tocker compose up
+$ tocker --dashboard compose up   # every service as a pane in one page
+$ tocker --stop
+```
+
+[examples/compose](examples/compose) is a web server and the Redis it
+counts its visits in.
+
+### As Docker's runtime
+
+Register it in `/etc/docker/daemon.json` and restart the daemon:
 
 ```json
 { "runtimes": { "tabc": { "path": "/path/to/tabc" } } }
@@ -69,7 +117,8 @@ On NixOS that is one line:
 virtualisation.docker.daemon.settings.runtimes.tabc.path = "${tabc}/bin/tabc";
 ```
 
-With Podman, nothing to set up:
+Docker's networks, `-p`, volumes and Compose then work as they do with
+runc: add `runtime: tabc` to a service. Podman needs no setup:
 
 ```console
 $ podman run --rm --runtime /path/to/tabc --platform linux/arm64 alpine echo hi
@@ -89,6 +138,8 @@ $ podman run --rm --runtime /path/to/tabc --platform linux/arm64 alpine echo hi
    travel over a WebSocket, and so does every network connection it
    makes, which the supervisor opens from inside the container's
    network namespace.
+6. A connection the other way arrives at the supervisor, which listens
+   on the ports the program opens and carries each one into the tab.
 
 To the engine the supervisor is the container: its pid, its exit
 status, its stdio. [docs/design.md](docs/design.md) has the details.
@@ -100,8 +151,10 @@ status, its stdio. [docs/design.md](docs/design.md) has the details.
 - Programs run 11 to 36 times slower than under runc, since they are
   emulated. Starting is fast; a long computation is not.
 - Each container is a whole browser: about 540 MiB of memory when idle.
-- No volumes, no published ports, no `docker exec`. Memory is the only
-  limit that is applied.
+- No `docker exec`, no UDP, no image builds on a Mac. Memory is the
+  only limit that is applied.
+- A container you open in your own browser is behind a thinner wall
+  than one in the hidden browser tabc starts.
 - The kernel in the tab is young. Treat this as an experiment, not as
   somewhere to keep secrets.
 
