@@ -24,7 +24,12 @@ import time
 TOOLS, SCENARIO, FRAMES, BIN, WORK = sys.argv[1:6]
 FRAME = 0.1
 TYPE_DELAY = 0.045
-WIDTH, HEIGHT = 760, 470
+# The browser's half in CSS pixels, at the width a blog column shows it,
+# and how many device pixels each is drawn with, so the page's own type
+# is read at its real size and stays sharp.
+WIDTH = 540
+HEIGHT = int(os.environ.get("DEMO_BROWSER_HEIGHT", "300"))
+SCALE = 2.5
 URL_FILE = os.environ["TABC_DEMO_URL_FILE"]
 PROMPT = "\033[1;32m$\033[0m "
 
@@ -48,7 +53,7 @@ class Tab:
         TABS.append(self)
         self.lock = threading.Lock()
         self.send("Emulation.setDeviceMetricsOverride", width=WIDTH, height=HEIGHT,
-                  deviceScaleFactor=1, mobile=False)
+                  deviceScaleFactor=SCALE, mobile=False)
 
     def send(self, method, **params):
         with self.lock:
@@ -211,7 +216,7 @@ def scenario_tab():
 
     shell.type("uname -sm")
     time.sleep(1.6)
-    container.click(300, 200)
+    container.click(250, 130)
     container.type("echo typed in the tab")
     time.sleep(1.8)
     shell.type("echo typed in the terminal")
