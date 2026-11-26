@@ -1,6 +1,25 @@
-# tabc
+<p align="center">
+  <img src="docs/img/mark.svg" width="64" height="64" alt="" />
+</p>
 
-Run containers in a browser tab.
+<h1 align="center">tabc</h1>
+
+<p align="center">
+  <b>Run containers in a browser tab.</b>
+</p>
+
+<p align="center">
+  <a href="#install">Install</a> ·
+  <a href="#use">Use</a> ·
+  <a href="#how-it-works">How it works</a> ·
+  <a href="#what-to-expect">What to expect</a> ·
+  <a href="#hacking">Hacking</a> ·
+  <a href="docs/design.md">Design</a>
+</p>
+
+<p align="center">
+  <a href="https://github.com/fzakaria/tabc/actions/workflows/ci.yml"><img src="https://github.com/fzakaria/tabc/actions/workflows/ci.yml/badge.svg?branch=main" alt="ci" /></a>
+</p>
 
 tabc is an OCI runtime, like runc. Where runc starts your container as
 a Linux process, tabc starts headless Chromium and boots the container
