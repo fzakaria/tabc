@@ -1,4 +1,6 @@
 #!/bin/sh
 # Stands in for the desktop's opener while a demo is recorded: the
-# address goes to a file, and the recorder's own browser loads it.
+# address is opened as a new tab in the recording's own browser, over
+# the browser's debugging port, and noted for the recorder.
+curl -s -o /dev/null -X PUT "http://127.0.0.1:${TABC_DEMO_DEBUG_PORT}/json/new?$1"
 echo "$1" > "$TABC_DEMO_URL_FILE"

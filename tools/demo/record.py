@@ -1,66 +1,140 @@
 #!/usr/bin/env python3
-"""Record a tabc demo: a terminal on the left, a browser on the right.
+"""Record a tabc demo: a terminal, and under it a real browser window.
 
 Run under `asciinema rec`, which records what this prints as the
-terminal's half. The browser's half is screenshots of a headless
-Chromium, one every FRAME seconds on a fixed grid from the start, so
-the two halves line up when laid side by side.
+terminal's half. The browser's half is a Chromium window on a virtual
+display, with its tabs and its address bar, recorded off the display by
+ffmpeg. Both halves are on one clock: this notes how long after its own
+start the screen recording began, and the two are lined up by that when
+they are put together (assemble.py).
 
-    python3 record.py <trynix tools dir> <scenario> <frames dir> <tabc bin dir> <work dir>
+    python3 record.py <scenario> <out dir> <tabc bin dir> <work dir>
 """
-import base64
 import fcntl
-import importlib.util
+import json
 import os
 import pty
 import select
+import shutil
 import struct
+import subprocess
 import sys
 import tempfile
 import termios
 import threading
 import time
+import urllib.parse
+import urllib.request
 
-TOOLS, SCENARIO, FRAMES, BIN, WORK = sys.argv[1:6]
-FRAME = 0.1
+import websocket
+
+BEGAN = time.time()
+SCENARIO, OUT, BIN, WORK = sys.argv[1:5]
 TYPE_DELAY = 0.045
-# The browser's half in CSS pixels, at the width a blog column shows it,
-# and how many device pixels each is drawn with, so the page's own type
-# is read at its real size and stays sharp.
-WIDTH = 540
-HEIGHT = int(os.environ.get("DEMO_BROWSER_HEIGHT", "300"))
-SCALE = 2.5
-URL_FILE = os.environ["TABC_DEMO_URL_FILE"]
 PROMPT = "\033[1;32m$\033[0m "
+URL_FILE = os.environ["TABC_DEMO_URL_FILE"]
+DEBUG_PORT = int(os.environ["TABC_DEMO_DEBUG_PORT"])
+DISPLAY = os.environ.get("TABC_DEMO_DISPLAY", ":97")
+FPS = 10
 
-spec = importlib.util.spec_from_file_location("cpu", os.path.join(TOOLS, "cpu-test.py"))
-cpu = importlib.util.module_from_spec(spec)
-sys.path.insert(0, TOOLS)
-spec.loader.exec_module(cpu)
+# The window in the browser's own units, and how many pixels each is
+# drawn with: the recording is twice as wide as it is shown, so type
+# stays sharp.
+SCALE = 2.5
+WINDOW_WIDTH = 544
+WINDOW_HEIGHT = int(os.environ.get("DEMO_WINDOW_HEIGHT", "360"))
+SCREEN = f"{int(WINDOW_WIDTH * SCALE)}x{int(WINDOW_HEIGHT * SCALE)}"
 
-os.makedirs(FRAMES, exist_ok=True)
-START = time.time()
+os.makedirs(OUT, exist_ok=True)
+children = []
 
 
-TABS = []
+def start(argv, **kwargs):
+    process = subprocess.Popen(argv, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, **kwargs)
+    children.append(process)
+    return process
 
 
-class Tab:
-    """One headless browser standing in for one tab."""
+# A display nobody is looking at, a real browser window on it, and a
+# recording of the display. The browser is told to use X: left to
+# itself on a Wayland desktop it would open on the desktop.
+start(["Xvfb", DISPLAY, "-screen", "0", f"{SCREEN}x24", "-nolisten", "tcp"])
+time.sleep(0.8)
+browser_env = {k: v for k, v in os.environ.items() if k != "WAYLAND_DISPLAY"}
+browser_env["DISPLAY"] = DISPLAY
+start(["chromium", "--ozone-platform=x11", f"--user-data-dir={tempfile.mkdtemp()}",
+       "--no-first-run", "--no-default-browser-check", "--disable-features=Translate",
+       f"--force-device-scale-factor={SCALE}", "--window-position=0,0",
+       f"--window-size={WINDOW_WIDTH},{WINDOW_HEIGHT}",
+       f"--remote-debugging-port={DEBUG_PORT}", "--remote-allow-origins=*", "about:blank"],
+      env=browser_env)
 
-    def __init__(self):
-        self.browser = cpu.Browser("chromium", os.path.join(tempfile.mkdtemp(), "profile"))
-        TABS.append(self)
-        self.lock = threading.Lock()
-        self.send("Emulation.setDeviceMetricsOverride", width=WIDTH, height=HEIGHT,
-                  deviceScaleFactor=SCALE, mobile=False)
+
+def debug(path, method="GET"):
+    request = urllib.request.Request(f"http://127.0.0.1:{DEBUG_PORT}{path}", method=method)
+    with urllib.request.urlopen(request, timeout=5) as response:
+        body = response.read()
+    # Some of the browser's answers are a plain sentence, not JSON.
+    try:
+        return json.loads(body)
+    except ValueError:
+        return None
+
+
+deadline = time.time() + 30
+while True:
+    try:
+        debug("/json/version")
+        break
+    except Exception:
+        if time.time() > deadline:
+            raise SystemExit("the browser did not start")
+        time.sleep(0.2)
+time.sleep(1.0)
+
+recorder = subprocess.Popen(
+    ["ffmpeg", "-y", "-loglevel", "error", "-f", "x11grab", "-framerate", str(FPS),
+     "-video_size", SCREEN, "-i", DISPLAY, "-c:v", "libx264", "-preset", "ultrafast",
+     "-crf", "0", os.path.join(OUT, "browser.mkv")],
+    stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+time.sleep(0.6)
+with open(os.path.join(OUT, "offset.txt"), "w") as out:
+    out.write(f"{time.time() - BEGAN - 0.3:.2f}\n")
+
+
+def tab_for(url):
+    """The tab showing an address, once the browser has one."""
+    deadline = time.time() + 30
+    while time.time() < deadline:
+        for target in debug("/json/list"):
+            if target.get("type") == "page" and target.get("url", "").startswith(url):
+                return target
+        time.sleep(0.1)
+    raise SystemExit(f"no tab for {url}")
+
+
+def new_tab(url):
+    return debug("/json/new?" + url, method="PUT")
+
+
+def activate(target):
+    debug("/json/activate/" + target["id"])
+
+
+class Page:
+    """A tab, to click in and type into."""
+
+    def __init__(self, target):
+        self.socket = websocket.create_connection(target["webSocketDebuggerUrl"])
+        self.next = 0
 
     def send(self, method, **params):
-        with self.lock:
-            return self.browser.send(method, **params)
-
-    def go(self, url):
-        self.send("Page.navigate", url=url)
+        self.next += 1
+        self.socket.send(json.dumps({"id": self.next, "method": method, "params": params}))
+        while True:
+            answer = json.loads(self.socket.recv())
+            if answer.get("id") == self.next:
+                return answer
 
     def click(self, x, y):
         for kind in ("mousePressed", "mouseReleased"):
@@ -75,43 +149,6 @@ class Tab:
         self.send("Input.dispatchKeyEvent", type="keyUp", key="Enter", code="Enter",
                   windowsVirtualKeyCode=13)
 
-    def shot(self):
-        result = self.send("Page.captureScreenshot", format="png")
-        return base64.b64decode((result.get("result") or result)["data"])
-
-
-BLANK = "data:text/html,<body style='background:%2316181d'></body>"
-shown = None
-stop = False
-marks = []
-
-
-def mark(label):
-    """Note when the browser's half changes what it shows, for captions."""
-    marks.append((round(time.time() - START, 2), label))
-
-
-def capture():
-    index = 0
-    last = None
-    while not stop:
-        due = START + index * FRAME
-        delay = due - time.time()
-        if delay > 0:
-            time.sleep(delay)
-        try:
-            last = shown.shot()
-        except Exception:
-            pass
-        # Every slot of the grid gets a frame, the last good one if this
-        # one was missed, so the frame number is the time.
-        behind = int((time.time() - START) / FRAME)
-        while index <= behind:
-            if last is not None:
-                with open(os.path.join(FRAMES, f"f{index:05d}.png"), "wb") as out:
-                    out.write(last)
-            index += 1
-
 
 def say(text):
     sys.stdout.write(text)
@@ -125,6 +162,19 @@ def type_command(text):
         time.sleep(TYPE_DELAY)
     time.sleep(0.4)
     say("\r\n")
+
+
+def finish():
+    """Stop the screen recording and everything started here, which
+    would otherwise hold the recording's terminal open."""
+    try:
+        recorder.stdin.write(b"q")
+        recorder.stdin.flush()
+        recorder.wait(timeout=10)
+    except Exception:
+        recorder.kill()
+    for process in reversed(children):
+        process.kill()
 
 
 class Shell:
@@ -166,15 +216,13 @@ class Shell:
         if not found:
             finish()
             raise SystemExit(f"never saw {text!r}")
-        return found
 
-    def type(self, text, enter=True):
+    def type(self, text):
         for character in text:
             os.write(self.fd, character.encode())
             time.sleep(TYPE_DELAY)
-        if enter:
-            time.sleep(0.3)
-            os.write(self.fd, b"\r")
+        time.sleep(0.3)
+        os.write(self.fd, b"\r")
 
     def wait_exit(self, timeout=30):
         deadline = time.time() + timeout
@@ -182,12 +230,14 @@ class Shell:
             time.sleep(0.1)
 
 
-def wait_url(timeout=60):
+def opened(timeout=60):
+    """The address the stand-in opener was last asked to open."""
     deadline = time.time() + timeout
     while time.time() < deadline:
         if os.path.exists(URL_FILE) and os.path.getsize(URL_FILE) > 0:
             return open(URL_FILE).read().strip()
         time.sleep(0.05)
+    finish()
     raise SystemExit("no address was opened")
 
 
@@ -195,29 +245,21 @@ ENV = dict(os.environ)
 
 
 def scenario_tab():
-    """One container in a tab: typed into from both sides, then serving."""
-    global shown
-    container = Tab()
-    container.go(BLANK)
-    served = Tab()
-    served.go(BLANK)
-    shown = container
-    threading.Thread(target=capture, daemon=True).start()
-    mark("no tab yet")
-
+    """One container in a tab: typed into from both sides, then serving
+    a page to a second tab."""
     time.sleep(1.0)
     command = "tabc run -it --open -p 8123:80 nginx:alpine sh"
     type_command(command)
     shell = Shell([os.path.join(BIN, "tabc")] + command.split()[1:], ENV)
-    container.go(wait_url())
-    mark("the container, in a tab")
+    container = tab_for(opened())
+    page = Page(container)
     shell.wait_for("# ")
     time.sleep(1.2)
 
     shell.type("uname -sm")
     time.sleep(1.6)
-    container.click(250, 130)
-    container.type("echo typed in the tab")
+    page.click(200, 100)
+    page.type("echo typed in the tab")
     time.sleep(1.8)
     shell.type("echo typed in the terminal")
     time.sleep(1.8)
@@ -228,13 +270,9 @@ def scenario_tab():
     shell.type("nginx")
     time.sleep(2.0)
 
-    served.go("http://127.0.0.1:8123/")
-    time.sleep(1.0)
-    shown = served
-    mark("a second tab, at localhost:8123")
-    time.sleep(3.5)
-    shown = container
-    mark("the container, in a tab")
+    new_tab("http://localhost:8123/")
+    time.sleep(4.0)
+    activate(container)
     time.sleep(2.5)
     shell.type("exit")
     shell.wait_exit()
@@ -243,12 +281,6 @@ def scenario_tab():
 
 def scenario_compose():
     """Compose under the dashboard: every service a pane."""
-    global shown
-    dashboard = Tab()
-    dashboard.go(BLANK)
-    shown = dashboard
-    threading.Thread(target=capture, daemon=True).start()
-    mark("no dashboard yet")
     tocker = os.path.join(BIN, "tocker")
 
     time.sleep(1.0)
@@ -258,18 +290,16 @@ def scenario_compose():
 
     type_command("tocker --dashboard compose up -d")
     up = Shell([tocker, "--dashboard", "compose", "up", "-d"], ENV)
-    dashboard.go(wait_url())
-    mark("the dashboard")
+    opened()
     up.wait_exit(120)
 
     # The web server takes a few seconds to import its modules under
     # emulation. The demo asks once it answers, as a person would after
     # seeing its "listening" line in the pane.
-    import subprocess
     deadline = time.time() + 60
     while time.time() < deadline:
         probe = subprocess.run(["curl", "-s", "-m", "2", "-o", "/dev/null", "-w", "%{http_code}",
-                                "http://127.0.0.1:8123/healthz-not-counted"], capture_output=True, text=True)
+                                "http://127.0.0.1:8123/"], capture_output=True, text=True)
         if probe.stdout.strip() not in ("", "000"):
             break
         time.sleep(0.3)
@@ -287,21 +317,7 @@ def scenario_compose():
     Shell([tocker, "--stop"], ENV).wait_exit()
 
 
-def finish():
-    """Stop the frames and the browsers, which would otherwise hold the
-    recording's terminal open."""
-    global stop
-    stop = True
-    time.sleep(0.3)
-    with open(os.path.join(FRAMES, "marks.txt"), "w") as out:
-        for when, label in marks:
-            out.write(f"{when}\t{label}\n")
-    for tab in TABS:
-        try:
-            tab.browser.close()
-        except Exception:
-            pass
-
-
-{"tab": scenario_tab, "compose": scenario_compose}[SCENARIO]()
-finish()
+try:
+    {"tab": scenario_tab, "compose": scenario_compose}[SCENARIO]()
+finally:
+    finish()

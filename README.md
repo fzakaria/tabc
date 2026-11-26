@@ -7,22 +7,30 @@ a Linux process, tabc starts headless Chromium and boots the container
 inside a tab, on a Linux kernel compiled to WebAssembly. The tab is the
 sandbox.
 
-![A terminal beside a browser tab. The tab boots Linux and shows a shell; commands typed in either appear in both, and a second tab loads a page nginx serves from the container.](docs/img/tab.webp)
+![docker run with the tabc runtime on Linux, then tabc run on a Mac with no VM running](docs/img/demo.webp)
 
 ```console
-$ tabc run -it --open alpine sh      # the container, as a tab you can type in
 $ docker run --rm --runtime tabc --platform linux/arm64 alpine uname -sm
 Linux aarch64
 ```
 
 There is no Linux underneath, so it works on a Mac with no VM and no
-hypervisor. So does Compose, with every service in a tab of its own:
+hypervisor. The tab can be one you watch, in your own browser, and
+type into from either side:
+
+```console
+$ tabc run -it --open -p 8123:80 nginx:alpine sh
+```
+
+![A terminal above a Chromium window. A tab opens, boots Linux and shows a shell; commands typed in the tab and in the terminal appear in both. nginx starts in the container and a second tab loads its page from localhost:8123.](docs/img/tab.webp)
+
+Compose works too, with every service in a tab of its own:
 
 ```console
 $ tocker compose up
 ```
 
-![A terminal runs tocker compose up; a browser page beside it shows a pane per service, Redis starting in one and a web server logging requests in the other.](docs/img/compose.webp)
+![A terminal runs tocker compose up; a Chromium window under it shows a pane per service, Redis starting in one and a web server logging requests in the other.](docs/img/compose.webp)
 
 A container starts in under a second: 0.87 s on a Ryzen laptop, 0.44 s
 on an M4.
@@ -38,8 +46,9 @@ hi
 
 tabc is one file, and `tocker` is the same file under another name. On
 Linux the Nix package brings its own Chromium. On a Mac tabc looks for
-Chrome in `/Applications`, or set `TABC_CHROMIUM`. With `--open` any
-recent browser will do and none has to be installed.
+Chrome in `/Applications`, or set `TABC_CHROMIUM`. With `--open` the
+container runs in the browser you already have, which has to be a
+recent Chrome or Chromium: Firefox cannot boot the kernel.
 
 ## Use
 
