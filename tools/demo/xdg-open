@@ -1,0 +1,4 @@
+#!/bin/sh
+# Stands in for the desktop's opener while a demo is recorded: the
+# address goes to a file, and the recorder's own browser loads it.
+echo "$1" > "$TABC_DEMO_URL_FILE"

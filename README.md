@@ -7,29 +7,22 @@ a Linux process, tabc starts headless Chromium and boots the container
 inside a tab, on a Linux kernel compiled to WebAssembly. The tab is the
 sandbox.
 
-![docker run with the tabc runtime on Linux, then tabc run on a Mac with no VM running](docs/img/demo.webp)
+![A terminal beside a browser tab. The tab boots Linux and shows a shell; commands typed in either appear in both, and a second tab loads a page nginx serves from the container.](docs/img/tab.webp)
 
 ```console
+$ tabc run -it --open alpine sh      # the container, as a tab you can type in
 $ docker run --rm --runtime tabc --platform linux/arm64 alpine uname -sm
 Linux aarch64
 ```
 
-There is no Linux underneath, so the same thing works on a Mac with no
-VM and no hypervisor:
-
-```console
-$ tabc run -it alpine sh
-/ # uname -sm
-Linux aarch64
-```
-
-And so does Compose, with every service in a tab of its own:
+There is no Linux underneath, so it works on a Mac with no VM and no
+hypervisor. So does Compose, with every service in a tab of its own:
 
 ```console
 $ tocker compose up
 ```
 
-![Two panes in one browser page: Redis starting in one, a web server logging requests in the other](docs/img/dashboard.webp)
+![A terminal runs tocker compose up; a browser page beside it shows a pane per service, Redis starting in one and a web server logging requests in the other.](docs/img/compose.webp)
 
 A container starts in under a second: 0.87 s on a Ryzen laptop, 0.44 s
 on an M4.
@@ -183,7 +176,8 @@ $ nix build .#tabc-darwin  # a Mac binary, built on Linux
 $ nix fmt                  # before committing
 ```
 
-`tools/bench/` has the scripts behind the numbers on this page.
+`tools/bench/` has the scripts behind the numbers on this page, and
+`tools/demo/` the ones that recorded its two animations.
 
 ## Credits
 
