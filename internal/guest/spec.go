@@ -22,6 +22,13 @@ type Spec struct {
 	GID            uint32   `json:"gid"`
 	AdditionalGids []uint32 `json:"additionalGids,omitempty"`
 
+	// User is who a second program runs as when the user was written
+	// for a person to read, "name" or "name:group": init looks the user
+	// up in the running container's own passwd and group files, where a
+	// user made after the container started is, and runs the program as
+	// what init finds in place of UID, GID and AdditionalGids.
+	User string `json:"user,omitempty"`
+
 	// Hostname is the container's host name, empty to keep the guest's.
 	Hostname string `json:"hostname,omitempty"`
 

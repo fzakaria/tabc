@@ -28,7 +28,7 @@ import (
 
 // exec runs a second program in a running container:
 //
-//	tabc exec [-it] [-e NAME=value] [-w dir] [-u uid[:gid]] <id> <program> [arguments]
+//	tabc exec [-it] [-e NAME=value] [-w dir] [-u user[:group]] <id> <program> [arguments]
 //
 // and, as an engine calls it, with the program described in a file and
 // the command itself gone once the program is running:
@@ -189,26 +189,6 @@ func parseExec(args []string) (execOptions, error) {
 	return options, nil
 }
 
-// parseExecUser reads a user as a number, or as a user's and a group's
-// with a colon between.
-func parseExecUser(text string) (*supervisor.ExecUser, error) {
-	uidText, gidText, hasGroup := strings.Cut(text, ":")
-	uid, err := strconv.ParseUint(uidText, 10, 32)
-	if err != nil {
-		return nil, fmt.Errorf("exec takes a user as a number, and %q is not one", uidText)
-	}
-	user := &supervisor.ExecUser{UID: uint32(uid)}
-	if !hasGroup {
-		return user, nil
-	}
-	gid, err := strconv.ParseUint(gidText, 10, 32)
-	if err != nil {
-		return nil, fmt.Errorf("exec takes a group as a number, and %q is not one", gidText)
-	}
-	user.GID = uint32(gid)
-	return user, nil
-}
-
 // execRequest returns the request the options describe, without a
 // terminal's size.
 func execRequest(options execOptions) (supervisor.ExecRequest, error) {
@@ -240,17 +220,11 @@ func execRequest(options execOptions) (supervisor.ExecRequest, error) {
 		Args:     options.command,
 		Env:      options.env,
 		Cwd:      options.cwd,
+		UserName: options.user,
 		Terminal: options.terminal,
 	}
 	if options.terminal {
 		request.Env = append([]string{envTerm}, request.Env...)
-	}
-	if options.user != "" {
-		user, err := parseExecUser(options.user)
-		if err != nil {
-			return request, err
-		}
-		request.User = user
 	}
 	return request, nil
 }

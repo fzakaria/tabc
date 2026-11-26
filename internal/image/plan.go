@@ -3,13 +3,13 @@ package image
 import (
 	"errors"
 	"fmt"
-	"strconv"
 	"strings"
 
 	v1 "github.com/google/go-containerregistry/pkg/v1"
 
 	"github.com/fzakaria/tabc/internal/guest"
 	"github.com/fzakaria/tabc/internal/rootfs"
+	"github.com/fzakaria/tabc/internal/users"
 )
 
 // What a container gets when neither the image nor the command line
@@ -31,22 +31,9 @@ const (
 	hostnamePath  = "/etc/hostname"
 )
 
-// The image's user and group databases, the position of the name, the
-// id and the primary group in a line, and the most of either file that
-// is read.
-const (
-	passwdPath    = "/etc/passwd"
-	groupPath     = "/etc/group"
-	fieldName     = 0
-	fieldID       = 2
-	fieldGroup    = 3
-	passwdMinimum = 4
-	groupMinimum  = 3
-	databaseLimit = 1 << 20
-)
-
-// idBits is the width of a user or group id.
-const idBits = 32
+// databaseLimit is the most of an image's passwd or group file that is
+// read.
+const databaseLimit = 1 << 20
 
 // Overrides are what the command line changes about an image's own
 // configuration.
@@ -135,73 +122,15 @@ func hasPath(env []string) bool {
 	return false
 }
 
-// ResolveUser turns a user as a person writes one into numbers, with
-// names looked up in an image's files: what a second program in a
-// container is run as (tabc exec).
-func ResolveUser(user string, tree rootfs.Tree) (uid, gid uint32, err error) {
-	return resolveUser(user, tree)
-}
-
 // resolveUser turns an image's user, "name", "uid", "name:group" or
 // "uid:gid", into numbers. A name is looked up in the image's own
 // passwd and group files. No user is the superuser.
 func resolveUser(user string, tree rootfs.Tree) (uid, gid uint32, err error) {
-	if user == "" {
-		return 0, 0, nil
-	}
-	userPart, groupPart, hasGroup := strings.Cut(user, ":")
-
-	// The user, and the primary group the passwd file gives a user
-	// found by name.
-	number, parseErr := strconv.ParseUint(userPart, 10, idBits)
-	if parseErr == nil {
-		uid = uint32(number)
-	} else {
-		fields, found := findEntry(tree, passwdPath, userPart, passwdMinimum)
-		if !found {
-			return 0, 0, fmt.Errorf("the image has no user %q", userPart)
-		}
-		number, err := strconv.ParseUint(fields[fieldID], 10, idBits)
-		if err != nil {
-			return 0, 0, fmt.Errorf("user %q in %s: %w", userPart, passwdPath, err)
-		}
-		uid = uint32(number)
-		if primary, err := strconv.ParseUint(fields[fieldGroup], 10, idBits); err == nil {
-			gid = uint32(primary)
-		}
-	}
-	if !hasGroup {
-		return uid, gid, nil
-	}
-
-	// The group, when the user names one.
-	number, parseErr = strconv.ParseUint(groupPart, 10, idBits)
-	if parseErr == nil {
-		return uid, uint32(number), nil
-	}
-	fields, found := findEntry(tree, groupPath, groupPart, groupMinimum)
-	if !found {
-		return 0, 0, fmt.Errorf("the image has no group %q", groupPart)
-	}
-	number, err = strconv.ParseUint(fields[fieldID], 10, idBits)
+	uid, gid, err = users.Resolve(user, func(path string) ([]byte, error) {
+		return tree.Read(path, 0, databaseLimit)
+	})
 	if err != nil {
-		return 0, 0, fmt.Errorf("group %q in %s: %w", groupPart, groupPath, err)
+		return 0, 0, fmt.Errorf("the image's user %q: %w", user, err)
 	}
-	return uid, uint32(number), nil
-}
-
-// findEntry returns the fields of the line for name in one of the
-// image's colon-separated databases.
-func findEntry(tree rootfs.Tree, path, name string, minimumFields int) ([]string, bool) {
-	content, err := tree.Read(path, 0, databaseLimit)
-	if err != nil {
-		return nil, false
-	}
-	for _, line := range strings.Split(string(content), "\n") {
-		fields := strings.Split(line, ":")
-		if len(fields) >= minimumFields && fields[fieldName] == name {
-			return fields, true
-		}
-	}
-	return nil, false
+	return uid, gid, nil
 }

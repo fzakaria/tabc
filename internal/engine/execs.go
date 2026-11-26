@@ -4,8 +4,6 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/fzakaria/tabc/internal/image"
-	"github.com/fzakaria/tabc/internal/rootfs"
 	"github.com/fzakaria/tabc/internal/supervisor"
 )
 
@@ -77,14 +75,14 @@ func (x *Exec) Resize(cols, rows int) error {
 }
 
 // execRequest returns what the supervisor is asked for a second
-// program, with the user the description named already looked up, nil
-// for the container's own.
-func execRequest(spec ExecSpec, user *supervisor.ExecUser) supervisor.ExecRequest {
+// program. The user goes as the description wrote one, for the guest to
+// look up in the running container's files.
+func execRequest(spec ExecSpec) supervisor.ExecRequest {
 	request := supervisor.ExecRequest{
 		Args:     spec.Cmd,
 		Env:      spec.Env,
 		Cwd:      spec.WorkingDir,
-		User:     user,
+		UserName: spec.User,
 		Terminal: spec.Tty,
 		Cols:     spec.Cols,
 		Rows:     spec.Rows,
@@ -136,39 +134,11 @@ func (e *Engine) StartExec(x *Exec) (*supervisor.ExecSession, error) {
 		return nil, fmt.Errorf("%w: exec %s has already run", ErrConflict, x.ID[:shortID])
 	}
 
-	user, err := e.execUser(x)
-	if err != nil {
-		return nil, err
-	}
-	session, err := supervisor.StartExec(e.socket(x.Container), execRequest(x.Spec, user))
+	session, err := supervisor.StartExec(e.socket(x.Container), execRequest(x.Spec))
 	if err != nil {
 		return nil, err
 	}
 	x.session = session
 	x.running = true
 	return session, nil
-}
-
-// execUser looks up the user a second program was given, nil for none.
-// A name is found in the image's own passwd and group files, as a
-// container's user is.
-func (e *Engine) execUser(x *Exec) (*supervisor.ExecUser, error) {
-	if x.Spec.User == "" {
-		return nil, nil
-	}
-	pulled, err := e.Image(x.Container.Spec.Image)
-	if err != nil {
-		return nil, err
-	}
-	tree, err := rootfs.OpenLayers(pulled.Layers)
-	if err != nil {
-		return nil, err
-	}
-	defer tree.Close()
-
-	uid, gid, err := image.ResolveUser(x.Spec.User, tree)
-	if err != nil {
-		return nil, err
-	}
-	return &supervisor.ExecUser{UID: uid, GID: gid}, nil
 }

@@ -59,19 +59,17 @@ func TestParseExec(t *testing.T) {
 	}
 }
 
-// TestParseExecUser checks that a user is read as a number, or two with
-// a colon between, and that a name is refused, since exec has no passwd
-// file of the container's at hand to look a name up in.
-func TestParseExecUser(t *testing.T) {
-	user, err := parseExecUser("5:6")
-	if err != nil || user.UID != 5 || user.GID != 6 {
-		t.Errorf("5:6 read as %+v, %v", user, err)
-	}
-	user, err = parseExecUser("7")
-	if err != nil || user.UID != 7 || user.GID != 0 {
-		t.Errorf("7 read as %+v, %v", user, err)
-	}
-	if _, err := parseExecUser("www-data"); err == nil {
-		t.Error("a name was accepted")
+// TestExecRequestUser checks that the user of `exec -u` goes to the
+// supervisor as written, a name as much as a number: the name is looked
+// up inside the container, where the passwd file of the moment is.
+func TestExecRequestUser(t *testing.T) {
+	for _, user := range []string{"5:6", "www-data", "www-data:staff"} {
+		request, err := execRequest(execOptions{command: []string{"id"}, user: user})
+		if err != nil {
+			t.Fatalf("%q: %v", user, err)
+		}
+		if request.UserName != user || request.User != nil {
+			t.Errorf("%q went as name %q, numbers %+v", user, request.UserName, request.User)
+		}
 	}
 }

@@ -197,6 +197,10 @@ that marks it finished. The second init waits for the file, enters the
 same root, becomes the user and execs. There is no namespace to join:
 the guest holds one container.
 
+A user given by name (`-u app`) is looked up by that second init, in
+the root it has just entered. The passwd file there is the running
+container's, so a user added since the image was built is found.
+
 The control socket's connection stays open for the program's life and
 carries its input, output and exit status as frames. The command that
 asked is the program's process on the host. An engine passes

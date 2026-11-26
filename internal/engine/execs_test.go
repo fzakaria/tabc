@@ -10,14 +10,12 @@ import (
 // TestExecRequest checks what the supervisor is asked for a second
 // program: the program, its extra environment and directory as given,
 // the terminal's type added when the program gets a terminal, and the
-// user only when one was named. Each case turns one description into a
+// user as written, for the guest to look up. Each case turns one description into a
 // request.
 func TestExecRequest(t *testing.T) {
-	named := &supervisor.ExecUser{UID: 5, GID: 6}
 	cases := []struct {
 		name string
 		spec ExecSpec
-		user *supervisor.ExecUser
 		want supervisor.ExecRequest
 	}{
 		{
@@ -27,16 +25,15 @@ func TestExecRequest(t *testing.T) {
 		},
 		{
 			name: "a shell on a terminal, as a user",
-			spec: ExecSpec{Cmd: []string{"sh"}, Tty: true, Cols: 100, Rows: 30},
-			user: named,
+			spec: ExecSpec{Cmd: []string{"sh"}, User: "app:staff", Tty: true, Cols: 100, Rows: 30},
 			want: supervisor.ExecRequest{
-				Args: []string{"sh"}, Env: []string{envTerm}, User: named,
+				Args: []string{"sh"}, Env: []string{envTerm}, UserName: "app:staff",
 				Terminal: true, Cols: 100, Rows: 30,
 			},
 		},
 	}
 	for _, c := range cases {
-		got := execRequest(c.spec, c.user)
+		got := execRequest(c.spec)
 		if !reflect.DeepEqual(got, c.want) {
 			t.Errorf("%s: got %+v, want %+v", c.name, got, c.want)
 		}

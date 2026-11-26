@@ -96,6 +96,16 @@ func TestExecSpec(t *testing.T) {
 			},
 			want: guest.Spec{Args: []string{"id"}, Env: []string{"ONLY=1"}, Cwd: "/tmp"},
 		},
+		{
+			// A user by name is the guest's to look up, and takes the
+			// place of the container's user and of its extra groups.
+			name:    "a user by name",
+			request: ExecRequest{Args: []string{"id"}, UserName: "app:staff"},
+			want: guest.Spec{
+				Args: []string{"id"}, Env: []string{"PATH=/bin", "MODE=prod"}, Cwd: "/srv",
+				User: "app:staff",
+			},
+		},
 	}
 	for _, c := range cases {
 		got, err := execSpec(container, c.request)

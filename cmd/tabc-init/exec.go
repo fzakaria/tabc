@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/fzakaria/tabc/internal/guest"
+	"github.com/fzakaria/tabc/internal/users"
 )
 
 // A second program in a container that is already running: what
@@ -57,6 +58,16 @@ func execInContainer(encoded string) {
 	}
 	if err := os.Chdir(spec.Cwd); err != nil {
 		fail(exitSetupFailed, err)
+	}
+
+	// A user by name is looked up now, in the root: the passwd file is
+	// the running container's, with whoever was added since the image.
+	if spec.User != "" {
+		spec.UID, spec.GID, err = users.Resolve(spec.User, os.ReadFile)
+		if err != nil {
+			fail(exitSetupFailed, err)
+		}
+		spec.AdditionalGids = nil
 	}
 	runProgram(spec)
 }

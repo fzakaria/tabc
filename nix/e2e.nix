@@ -98,6 +98,17 @@ pkgs.runCommand "tabc-e2e"
     echo "exec: environment, directory and user"
     test "$(inside -e WORD=x -w /tmp -u 5:6 long sh -c 'echo $WORD $PWD $(id -u):$(id -g)')" = "x /tmp 5:6"
 
+    # A user by name is looked up in the running container, so a user
+    # the container gained after its start is found, and one nobody
+    # added is refused.
+    echo "exec: a user added since the start, by name"
+    inside long sh -c 'echo "late:x:1234:1235::/:/bin/sh" >> /etc/passwd'
+    test "$(inside -u late long sh -c 'echo $(id -u):$(id -g)')" = "1234:1235"
+    if inside -u nobody-here long true 2> /dev/null; then
+      echo "a user nobody added ran a program" >&2
+      exit 1
+    fi
+
     echo "exec: a program that is not there"
     status=0
     inside long no-such-program 2> /dev/null || status=$?

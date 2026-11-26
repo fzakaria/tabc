@@ -95,8 +95,13 @@ type ExecRequest struct {
 	Environment Environment `json:"environment,omitempty"`
 	// Cwd is the program's directory, empty for the container's.
 	Cwd string `json:"cwd,omitempty"`
-	// User is who the program runs as, nil for the container's user.
-	User *ExecUser `json:"user,omitempty"`
+	// User is who the program runs as, in numbers, as an engine gives
+	// a user. UserName is a user as a person writes one, "name",
+	// "uid", "name:group" or "uid:gid", which the guest looks up in the
+	// container's own files. With neither, the program runs as the
+	// container's user; with both, as UserName.
+	User     *ExecUser `json:"user,omitempty"`
+	UserName string    `json:"userName,omitempty"`
 	// Terminal gives the program a terminal of Cols by Rows cells.
 	Terminal bool `json:"terminal,omitempty"`
 	Cols     int  `json:"cols,omitempty"`
@@ -157,6 +162,12 @@ func execSpec(container guest.Spec, request ExecRequest) (guest.Spec, error) {
 		spec.UID = request.User.UID
 		spec.GID = request.User.GID
 		spec.AdditionalGids = request.User.AdditionalGids
+	}
+	if request.UserName != "" {
+		// The numbers are the guest's to find, and the container's
+		// user's are not the named user's.
+		spec.User = request.UserName
+		spec.UID, spec.GID, spec.AdditionalGids = 0, 0, nil
 	}
 	return spec, nil
 }
