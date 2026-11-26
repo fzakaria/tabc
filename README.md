@@ -51,9 +51,6 @@ $ tocker compose up
 
 <p align="center"><a href="docs/img/compose.webp"><img src="docs/img/compose.webp" width="480" alt="A terminal runs tocker compose up; a Chromium window under it shows a pane per service, Redis starting in one and a web server in the other. A second tab loads the web service and its count goes up."></a></p>
 
-A container starts in about a second: 1.3 s on a Ryzen laptop, 0.8 s on
-an M4. Those are with the default two CPUs; with `--cpus 1` the same
-starts take 0.9 s and 0.45 s.
 
 ## Install
 
@@ -89,7 +86,7 @@ $ tabc run -v "$PWD":/work -w /work alpine ls
 | ---------------------- | --------------------------------------------- |
 | `-i`, `-t`             | keep stdin open, give the program a terminal  |
 | `-e`, `-w`, `-u`, `-m` | environment, directory, user, memory          |
-| `--cpus`               | how many CPUs the guest has, 2 unless you say |
+| `--cpus`               | how many CPUs the guest has, 2 is the default |
 | `-p host:container`    | publish a port, on loopback by default        |
 | `-v dir:/path[:ro]`    | mount a directory, live and writable          |
 | `--name`, `--network`  | let containers find each other by name        |
