@@ -57,9 +57,25 @@ type Plan struct {
 	Rootfs string   `json:"rootfs,omitempty"`
 	Layers []string `json:"layers,omitempty"`
 
-	// ResolvConf is resolver configuration naming the servers to ask
-	// for the guest's lookups, empty for the host's own.
-	ResolvConf string `json:"resolvConf,omitempty"`
+	// ResolvConfPath is a file of resolver configuration naming the
+	// servers to ask for the guest's lookups, empty for the host's own.
+	// A path and not the file's content: an engine may write the file
+	// after the container is created, once the container's network is
+	// attached, and Docker does.
+	ResolvConfPath string `json:"resolvConfPath,omitempty"`
+
+	// Publish are ports of the host forwarded to ports of the guest.
+	Publish []Publish `json:"publish,omitempty"`
+}
+
+// Publish is one port of the host forwarded to a port of the guest.
+type Publish struct {
+	// HostIP is the address to listen on, empty for loopback.
+	HostIP string `json:"hostIP,omitempty"`
+	// HostPort is the port to listen on, and GuestPort the port in the
+	// guest connections go to.
+	HostPort  int `json:"hostPort"`
+	GuestPort int `json:"guestPort"`
 }
 
 // Save writes the plan into a container's state directory.

@@ -8,6 +8,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"os"
 	"strconv"
 	"strings"
 	"sync"
@@ -71,21 +72,15 @@ type netMessage struct {
 	Count   int    `json:"n,omitempty"`
 }
 
-// resolverFor returns a resolver that asks the servers a container's
-// resolver configuration names. The supervisor's own configuration is
-// the host's, and the host's servers may not exist on the container's
-// network: an engine writes the container a list that does. With no
-// usable configuration the default resolver is returned.
-func resolverFor(resolvConf string) *net.Resolver {
-	var servers []string
-	scanner := bufio.NewScanner(strings.NewReader(resolvConf))
-	for scanner.Scan() {
-		fields := strings.Fields(scanner.Text())
-		if len(fields) >= 2 && fields[0] == directiveNameserver && net.ParseIP(fields[1]) != nil {
-			servers = append(servers, net.JoinHostPort(fields[1], dnsPort))
-		}
-	}
-	if len(servers) == 0 {
+// resolverFor returns a resolver that asks the servers the file at
+// path names, a container's resolver configuration. The supervisor's
+// own configuration is the host's, and the host's servers may not exist
+// on the container's network: an engine writes the container a list
+// that does. The file is read at each lookup, since an engine may
+// rewrite it once the container's network is attached. With no path, or
+// while the file names no server, the host's own resolver is asked.
+func resolverFor(path string) *net.Resolver {
+	if path == "" {
 		return net.DefaultResolver
 	}
 
@@ -96,16 +91,46 @@ func resolverFor(resolvConf string) *net.Resolver {
 	var mu sync.Mutex
 	return &net.Resolver{
 		PreferGo: true,
-		Dial: func(ctx context.Context, network, _ string) (net.Conn, error) {
+		Dial: func(ctx context.Context, network, hostServer string) (net.Conn, error) {
+			var dialer net.Dialer
+			servers := nameservers(path)
+			if len(servers) == 0 {
+				return dialer.DialContext(ctx, network, hostServer)
+			}
+
 			mu.Lock()
 			server := servers[next%len(servers)]
 			next++
 			mu.Unlock()
-
-			var dialer net.Dialer
 			return dialer.DialContext(ctx, network, server)
 		},
 	}
+}
+
+// nameservers returns the IPv4 servers a resolver configuration file
+// names, each with the DNS port. IPv6 servers are left out: the
+// supervisor dials for a guest whose network stack carries IPv4 only,
+// and a container's namespace may have no IPv6 route at all.
+func nameservers(path string) []string {
+	content, err := os.ReadFile(path)
+	if err != nil {
+		return nil
+	}
+
+	var servers []string
+	scanner := bufio.NewScanner(strings.NewReader(string(content)))
+	for scanner.Scan() {
+		fields := strings.Fields(scanner.Text())
+		if len(fields) < 2 || fields[0] != directiveNameserver {
+			continue
+		}
+		address := net.ParseIP(fields[1])
+		if address == nil || address.To4() == nil {
+			continue
+		}
+		servers = append(servers, net.JoinHostPort(fields[1], dnsPort))
+	}
+	return servers
 }
 
 // serveLookup answers a name with its IPv4 addresses, which is all the

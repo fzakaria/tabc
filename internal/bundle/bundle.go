@@ -236,13 +236,17 @@ func (b *Bundle) NetworkNamespace() (path string, wanted bool) {
 	return "", false
 }
 
-// ResolvConf returns the resolver configuration the engine wrote for
-// the container, the content of the file bound at /etc/resolv.conf, or
-// "" when the engine bound none. The file names servers that exist on
-// the container's network, which is where the supervisor makes the
-// guest's lookups.
-func (b *Bundle) ResolvConf() string {
-	return b.boundFiles()[resolvPath]
+// ResolvConfPath returns the file of resolver configuration the engine
+// binds at /etc/resolv.conf, or "" when the engine binds none. The file
+// names servers that exist on the container's network, which is where
+// the supervisor makes the guest's lookups.
+func (b *Bundle) ResolvConfPath() string {
+	for _, mount := range b.Spec.Mounts {
+		if isBind(mount) && filepath.Clean(mount.Destination) == resolvPath {
+			return mount.Source
+		}
+	}
+	return ""
 }
 
 // Plan returns the container as the supervisor runs it. An engine that
@@ -255,12 +259,12 @@ func (b *Bundle) Plan() plan.Plan {
 	}
 
 	return plan.Plan{
-		Spec:        b.GuestSpec(NetworkOn),
-		Terminal:    terminal,
-		Cols:        int(cols),
-		Rows:        int(rows),
-		MemoryBytes: b.MemoryLimit(),
-		Rootfs:      b.Rootfs,
-		ResolvConf:  b.ResolvConf(),
+		Spec:           b.GuestSpec(NetworkOn),
+		Terminal:       terminal,
+		Cols:           int(cols),
+		Rows:           int(rows),
+		MemoryBytes:    b.MemoryLimit(),
+		Rootfs:         b.Rootfs,
+		ResolvConfPath: b.ResolvConfPath(),
 	}
 }

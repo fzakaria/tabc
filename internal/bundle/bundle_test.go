@@ -85,6 +85,15 @@ func TestGuestSpec(t *testing.T) {
 		t.Error("a bound directory was copied as a file")
 	}
 
+	// The engine's resolver file is named, not copied: the engine may
+	// write it after the container is created.
+	if got := b.ResolvConfPath(); got != resolv {
+		t.Errorf("resolver file %q, want %q", got, resolv)
+	}
+	if got := b.Plan().ResolvConfPath; got != resolv {
+		t.Errorf("the plan's resolver file %q, want %q", got, resolv)
+	}
+
 	// With no network there is nothing to resolve with.
 	if _, has := b.GuestSpec(NetworkOff).Files["/etc/resolv.conf"]; has {
 		t.Error("a container with no network got a resolver file")
