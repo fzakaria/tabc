@@ -17,6 +17,7 @@ import (
 	"github.com/fzakaria/tabc/internal/image"
 	"github.com/fzakaria/tabc/internal/plan"
 	"github.com/fzakaria/tabc/internal/rootfs"
+	"github.com/fzakaria/tabc/internal/runner"
 	"github.com/fzakaria/tabc/internal/state"
 )
 
@@ -289,11 +290,11 @@ func runImage(args []string) (int, error) {
 		planned.Networks = append(planned.Networks, plan.Network{Name: network, Names: names})
 	}
 	record := state.Container{ID: id, Status: state.Creating, Created: time.Now().UTC()}
-	process, dir, err := createContainer(record, planned, launch{
-		root:  root,
-		id:    id,
-		stdin: input,
-		start: func(process *exec.Cmd) error { return process.Start() },
+	process, dir, err := runner.Create(record, planned, runner.Launch{
+		Root:  root,
+		ID:    id,
+		Stdin: input,
+		Start: func(process *exec.Cmd) error { return process.Start() },
 	})
 	if err != nil {
 		return 0, err

@@ -29,6 +29,7 @@ import (
 	specs "github.com/opencontainers/runtime-spec/specs-go"
 
 	"github.com/fzakaria/tabc/internal/cli"
+	"github.com/fzakaria/tabc/internal/runner"
 	"github.com/fzakaria/tabc/internal/state"
 	"github.com/fzakaria/tabc/internal/supervisor"
 )
@@ -38,14 +39,13 @@ var version = "dev"
 
 // The commands.
 const (
-	commandCreate    = "create"
-	commandStart     = "start"
-	commandState     = "state"
-	commandKill      = "kill"
-	commandDelete    = "delete"
-	commandRun       = "run"
-	commandFeatures  = "features"
-	commandSupervise = "supervise"
+	commandCreate   = "create"
+	commandStart    = "start"
+	commandState    = "state"
+	commandKill     = "kill"
+	commandDelete   = "delete"
+	commandRun      = "run"
+	commandFeatures = "features"
 )
 
 // exitError is tabc's own failure status, apart from a program's.
@@ -91,7 +91,7 @@ func main() {
 		if err == nil {
 			os.Exit(status)
 		}
-	case commandSupervise:
+	case runner.CommandSupervise:
 		os.Exit(supervise(inv))
 	case "":
 		err = errors.New("no command given; see https://github.com/fzakaria/tabc")

@@ -12,19 +12,21 @@ import (
 
 // The flags tabc acts on.
 const (
-	flagRoot          = "root"
-	flagLog           = "log"
-	flagLogFormat     = "log-format"
-	flagBundle        = "bundle"
-	flagBundleShort   = "b"
-	flagPidFile       = "pid-file"
-	flagConsoleSocket = "console-socket"
-	flagForce         = "force"
-	flagForceShort    = "f"
-	flagAll           = "all"
-	flagAllShort      = "a"
-	flagVersion       = "version"
-	flagVersionShort  = "v"
+	flagRoot         = "root"
+	flagLog          = "log"
+	flagLogFormat    = "log-format"
+	flagBundle       = "bundle"
+	flagBundleShort  = "b"
+	flagPidFile      = "pid-file"
+	flagForce        = "force"
+	flagForceShort   = "f"
+	flagAll          = "all"
+	flagAllShort     = "a"
+	flagVersion      = "version"
+	flagVersionShort = "v"
+	// FlagConsoleSocket names the socket an engine waits on for the
+	// program's terminal.
+	FlagConsoleSocket = "console-socket"
 	// FlagMirrorPorts is create's word to the supervisor that the
 	// supervisor runs in the container's own network namespace.
 	FlagMirrorPorts = "mirror-ports"
@@ -41,7 +43,7 @@ var valueFlags = map[string]bool{
 	flagBundle:        true,
 	flagBundleShort:   true,
 	flagPidFile:       true,
-	flagConsoleSocket: true,
+	FlagConsoleSocket: true,
 	"criu":            true,
 	"rootless":        true,
 	"preserve-fds":    true,
@@ -121,7 +123,7 @@ func Parse(args []string) (Invocation, error) {
 			inv.Bundle = value
 		case flagPidFile:
 			inv.PidFile = value
-		case flagConsoleSocket:
+		case FlagConsoleSocket:
 			inv.ConsoleSocket = value
 		case flagForce, flagForceShort:
 			inv.Force = true
