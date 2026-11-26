@@ -19,6 +19,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -271,6 +272,18 @@ func run(options Options, dir string, logger *log.Logger, logFile *os.File) (int
 			default:
 			}
 			return nil
+		case requestResize:
+			// A terminal's size from whoever holds its other end, for a
+			// terminal that is not a pty the supervisor could ask.
+			if len(words) != 3 {
+				return errors.New("resize needs columns and rows")
+			}
+			cols, colsErr := strconv.Atoi(words[1])
+			rows, rowsErr := strconv.Atoi(words[2])
+			if colsErr != nil || rowsErr != nil || cols <= 0 || rows <= 0 {
+				return errors.New("resize needs two positive numbers")
+			}
+			return conversation.send(pageMessage{Type: toPageResize, Cols: cols, Rows: rows})
 		default:
 			return fmt.Errorf("unknown request %q", words[0])
 		}
