@@ -376,6 +376,7 @@ func supervise(inv cli.Invocation) int {
 		Root:          state.Root(inv.Root),
 		ID:            id,
 		ConsoleSocket: inv.ConsoleSocket,
+		MirrorPorts:   inv.MirrorPorts,
 		Ready:         os.NewFile(readyDescriptor, "ready"),
 		Share:         files,
 		Chromium:      browser,

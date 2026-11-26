@@ -26,11 +26,18 @@ const (
 	toPageEOF    = "eof"
 	toPageKill   = "kill"
 	toPageResize = "resize"
+	// toPageConnect asks the page for a connection into the guest
+	// (inbound.go).
+	toPageConnect = "connect"
 
 	fromPageReady = "ready"
 	fromPageExit  = "exit"
 	fromPageLog   = "log"
 	fromPageError = "error"
+	// fromPageListen and fromPageUnlisten report a port the container's
+	// program opened or closed.
+	fromPageListen   = "listen"
+	fromPageUnlisten = "unlisten"
 )
 
 // maxMessage bounds one WebSocket message. The page sends output in
@@ -46,6 +53,10 @@ type pageMessage struct {
 	Signal  string `json:"signal,omitempty"`
 	Cols    int    `json:"cols,omitempty"`
 	Rows    int    `json:"rows,omitempty"`
+	// Port is a port in the guest, and Connection the number of a
+	// connection the page is asked to open to one.
+	Port       int    `json:"port,omitempty"`
+	Connection string `json:"id,omitempty"`
 }
 
 // session is the supervisor's conversation with the container's page.
@@ -55,6 +66,9 @@ type session struct {
 	stderr io.Writer
 	// logf records what the page reports about itself.
 	logf func(format string, args ...any)
+	// onListen is told when the container's program opens or closes a
+	// port, nil when nobody mirrors ports.
+	onListen func(port int, open bool)
 
 	// ready is closed when the guest is up, exit carries the program's
 	// status, and failed what went wrong in the page.
@@ -141,6 +155,10 @@ func (s *session) serve(w http.ResponseWriter, r *http.Request) {
 			}
 		case fromPageLog:
 			s.logf("guest: %s", message.Message)
+		case fromPageListen, fromPageUnlisten:
+			if s.onListen != nil {
+				s.onListen(message.Port, message.Type == fromPageListen)
+			}
 		case fromPageError:
 			select {
 			case s.failed <- message.Message:

@@ -3,6 +3,8 @@ package main
 import (
 	"reflect"
 	"testing"
+
+	"github.com/fzakaria/tabc/internal/plan"
 )
 
 // TestParseImageRun checks that flags before the image are read, in
@@ -55,6 +57,28 @@ func TestParseMemory(t *testing.T) {
 	for _, text := range []string{"", "m", "-1g", "lots"} {
 		if _, err := parseMemory(text); err == nil {
 			t.Errorf("parseMemory(%q) succeeded", text)
+		}
+	}
+}
+
+// TestParsePublish checks the three ways a published port is written,
+// and that text that is not one is refused.
+func TestParsePublish(t *testing.T) {
+	cases := map[string]plan.Publish{
+		"80":                {HostPort: 80, GuestPort: 80},
+		"8080:80":           {HostPort: 8080, GuestPort: 80},
+		"127.0.0.1:8080:80": {HostIP: "127.0.0.1", HostPort: 8080, GuestPort: 80},
+		"0.0.0.0:9000:9000": {HostIP: "0.0.0.0", HostPort: 9000, GuestPort: 9000},
+	}
+	for text, want := range cases {
+		got, err := parsePublish(text)
+		if err != nil || got != want {
+			t.Errorf("parsePublish(%q) = %+v, %v; want %+v", text, got, err, want)
+		}
+	}
+	for _, text := range []string{"", "web", "0:80", "1:2:3:4", "80:99999"} {
+		if _, err := parsePublish(text); err == nil {
+			t.Errorf("parsePublish(%q) succeeded", text)
 		}
 	}
 }

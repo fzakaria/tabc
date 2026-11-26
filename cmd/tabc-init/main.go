@@ -85,9 +85,15 @@ const (
 	pathListSeparate = ":"
 )
 
+// flagPorts runs the port watcher (ports.go) in place of a container.
+const flagPorts = "--ports"
+
 func main() {
 	if len(os.Args) != 2 {
-		fail(exitSetupFailed, errors.New("usage: tabc-init <spec.json>"))
+		fail(exitSetupFailed, errors.New("usage: tabc-init <spec.json> | --ports"))
+	}
+	if os.Args[1] == flagPorts {
+		watchPorts()
 	}
 
 	spec, err := readSpec(os.Args[1])

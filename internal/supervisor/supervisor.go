@@ -52,8 +52,12 @@ const (
 )
 
 // loopbackAddress is where the page's server listens: loopback, on a
-// port the system picks.
-const loopbackAddress = "127.0.0.1:0"
+// port the system picks. loopbackHost is where a published port
+// listens when its flag names no address.
+const (
+	loopbackHost    = "127.0.0.1"
+	loopbackAddress = loopbackHost + ":0"
+)
 
 // The guest's memory: what a container gets when its configuration
 // sets no limit, and the least and most the guest is given.
@@ -95,6 +99,12 @@ type Options struct {
 
 	// Ready is the pipe to the creator, nil when nobody waits.
 	Ready *os.File
+
+	// MirrorPorts has the supervisor listen on every port the
+	// container's program opens. That is right when the supervisor runs
+	// in a network namespace that is the container's own, and wrong on
+	// the host's network, where the ports would be the host's.
+	MirrorPorts bool
 
 	// Share holds the page, the SDK and the guest's init
 	// (internal/assets), and Chromium is the browser to run.
@@ -181,21 +191,39 @@ func run(options Options, dir string, logger *log.Logger, logFile *os.File) (int
 		return 0, err
 	}
 	conversation := newSession(stdout, stderr, logger.Printf)
+
+	// Connections into the container: every port the program opens,
+	// when the container has a network of its own to open them on.
+	incoming := newInbound(conversation, logger.Printf)
+	defer incoming.close()
+	if options.MirrorPorts {
+		conversation.onListen = func(port int, open bool) {
+			if !open {
+				incoming.unlisten(port)
+				return
+			}
+			if err := incoming.listen(anyAddress, port, port); err != nil {
+				logger.Printf("mirroring port %d: %v", port, err)
+			}
+		}
+	}
 	pages := &server{
 		token: token,
 		share: options.Share,
 		config: pageConfig{
-			Terminal:  hasTerminal,
-			Cols:      orDefault(planned.Cols, defaultCols),
-			Rows:      orDefault(planned.Rows, defaultRows),
-			Term:      terminalType,
-			MemoryMiB: memoryMiB(planned.MemoryBytes),
-			Network:   true,
+			Terminal:    hasTerminal,
+			Cols:        orDefault(planned.Cols, defaultCols),
+			Rows:        orDefault(planned.Rows, defaultRows),
+			Term:        terminalType,
+			MemoryMiB:   memoryMiB(planned.MemoryBytes),
+			Network:     true,
+			MirrorPorts: options.MirrorPorts,
 		},
 		spec:     planned.Spec,
 		files:    rootfs.Handler{Tree: tree},
 		session:  conversation,
-		resolver: resolverFor(planned.ResolvConf),
+		inbound:  incoming,
+		resolver: resolverFor(planned.ResolvConfPath),
 	}
 	listener, err := net.Listen("tcp4", loopbackAddress)
 	if err != nil {
@@ -279,6 +307,19 @@ func run(options Options, dir string, logger *log.Logger, logFile *os.File) (int
 	case caught := <-interrupted:
 		return 0, fmt.Errorf("stopped by %s while the guest was starting", caught)
 	}
+	// The ports published to the host, now that there is a guest to
+	// carry their connections to. A port that cannot be listened on is
+	// a container that cannot be created: its user asked for the port.
+	for _, published := range planned.Publish {
+		hostIP := published.HostIP
+		if hostIP == "" {
+			hostIP = loopbackHost
+		}
+		if err := incoming.listen(hostIP, published.HostPort, published.GuestPort); err != nil {
+			return 0, fmt.Errorf("publishing port %d: %w", published.HostPort, err)
+		}
+	}
+
 	record.Status = state.Created
 	if err := state.Save(dir, record); err != nil {
 		return 0, err

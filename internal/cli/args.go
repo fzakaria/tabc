@@ -25,6 +25,9 @@ const (
 	flagAllShort      = "a"
 	flagVersion       = "version"
 	flagVersionShort  = "v"
+	// FlagMirrorPorts is create's word to the supervisor that the
+	// supervisor runs in the container's own network namespace.
+	FlagMirrorPorts = "mirror-ports"
 )
 
 // valueFlags are the flags that take a value, the ones tabc reads and
@@ -70,6 +73,9 @@ type Invocation struct {
 	Force   bool
 	All     bool
 	Version bool
+
+	// MirrorPorts is the supervisor's own flag (FlagMirrorPorts).
+	MirrorPorts bool
 
 	// Args are the words after the command that are not flags: the
 	// container's id first.
@@ -123,6 +129,8 @@ func Parse(args []string) (Invocation, error) {
 			inv.All = true
 		case flagVersion, flagVersionShort:
 			inv.Version = true
+		case FlagMirrorPorts:
+			inv.MirrorPorts = true
 		}
 	}
 

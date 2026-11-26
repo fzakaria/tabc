@@ -32,6 +32,7 @@ const (
 	routeFS       = "fs"
 	routeControl  = "ctl"
 	routeNet      = "net"
+	routeInbound  = "in"
 	routeUnkernel = "unkernel"
 	netLookup     = "dns"
 	netConnect    = "tcp"
@@ -48,6 +49,8 @@ type pageConfig struct {
 	Term      string `json:"term"`
 	MemoryMiB int    `json:"memoryMiB"`
 	Network   bool   `json:"network"`
+	// MirrorPorts has the page watch which ports the program opens.
+	MirrorPorts bool `json:"mirrorPorts"`
 }
 
 // fileServer answers the page's requests for the container's files
@@ -66,6 +69,7 @@ type server struct {
 	spec     guest.Spec
 	files    fileServer
 	session  *session
+	inbound  *inbound
 	resolver *net.Resolver
 }
 
@@ -113,6 +117,8 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		s.session.serve(w, r)
 	case routeNet:
 		s.serveNet(w, r, remainder)
+	case routeInbound:
+		s.inbound.serve(w, r)
 	case routeUnkernel:
 		s.serveShared(w, r, assets.Unkernel, remainder)
 	default:

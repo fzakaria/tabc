@@ -35,6 +35,13 @@ var memoryUnits = map[byte]int64{
 	'g': 1 << 30,
 }
 
+// publishPartsWithIP is how many parts a published port has when it
+// names an address, and portBits the width of a port number.
+const (
+	publishPartsWithIP = 3
+	portBits           = 16
+)
+
 // envTerm is the variable that tells a program what its terminal is.
 const envTerm = "TERM=xterm-256color"
 
@@ -47,6 +54,7 @@ type imageRun struct {
 	cwd         string
 	user        string
 	memory      int64
+	publish     []plan.Publish
 	image       string
 	command     []string
 }
@@ -100,6 +108,14 @@ func parseImageRun(args []string) (imageRun, error) {
 			parsed.cwd, err = value(name, inline, hasInline)
 		case "-u", "--user":
 			parsed.user, err = value(name, inline, hasInline)
+		case "-p", "--publish":
+			var text string
+			text, err = value(name, inline, hasInline)
+			if err == nil {
+				var published plan.Publish
+				published, err = parsePublish(text)
+				parsed.publish = append(parsed.publish, published)
+			}
 		case "-m", "--memory":
 			var text string
 			text, err = value(name, inline, hasInline)
@@ -113,7 +129,37 @@ func parseImageRun(args []string) (imageRun, error) {
 			return parsed, err
 		}
 	}
-	return parsed, errors.New("usage: tabc run [-it] [--pull] [-e NAME=value] [-w dir] [-u user] [-m memory] <image> [program...]")
+	return parsed, errors.New("usage: tabc run [-it] [--pull] [-p [address:]host:container] [-e NAME=value] [-w dir] [-u user] [-m memory] <image> [program...]")
+}
+
+// parsePublish reads a published port as `docker run -p` writes one:
+// "8080:80", "127.0.0.1:8080:80", or "80" for the same port on both
+// sides. Without an address the port is published on loopback.
+func parsePublish(text string) (plan.Publish, error) {
+	var published plan.Publish
+	parts := strings.Split(text, ":")
+
+	// The address, when there are three parts.
+	if len(parts) == publishPartsWithIP {
+		published.HostIP = parts[0]
+		parts = parts[1:]
+	}
+	if len(parts) == 0 || len(parts) > publishPartsWithIP-1 {
+		return published, fmt.Errorf("published port %q is not [address:]host:container", text)
+	}
+
+	// One port is both; two are the host's, then the container's.
+	numbers := make([]int, 0, len(parts))
+	for _, part := range parts {
+		number, err := strconv.ParseUint(part, 10, portBits)
+		if err != nil || number == 0 {
+			return published, fmt.Errorf("published port %q: %q is not a port", text, part)
+		}
+		numbers = append(numbers, int(number))
+	}
+	published.HostPort = numbers[0]
+	published.GuestPort = numbers[len(numbers)-1]
+	return published, nil
 }
 
 // parseMemory reads a memory limit: a number of bytes, or a number with
@@ -179,6 +225,7 @@ func runImage(args []string) (int, error) {
 		Terminal:    plan.TerminalNone,
 		MemoryBytes: parsed.memory,
 		Layers:      pulled.Layers,
+		Publish:     parsed.publish,
 	}
 
 	// A terminal is the one tabc was started on, raw for as long as the

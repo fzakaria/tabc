@@ -18,11 +18,14 @@ const FS_URL = "fs/";
 const CONTROL_URL = "ctl";
 const NET_DNS_URL = "net/dns";
 const NET_TCP_URL = "net/tcp";
+const INBOUND_URL = "in";
 
 // Where the guest finds the image, and init with the container's spec.
 const LOWER_DIR = "/tabc/lower";
 const BIN_DIR = "/tabc/bin";
 const INIT_NAME = "init";
+// The argument that makes init watch the program's open ports.
+const PORTS_FLAG = "--ports";
 const SPEC_NAME = "spec.json";
 const EXECUTABLE = 0o755;
 
@@ -46,12 +49,15 @@ const FromSupervisor = Object.freeze({
   EOF: "eof",
   KILL: "kill",
   RESIZE: "resize",
+  CONNECT: "connect",
 });
 const ToSupervisor = Object.freeze({
   READY: "ready",
   EXIT: "exit",
   LOG: "log",
   ERROR: "error",
+  LISTEN: "listen",
+  UNLISTEN: "unlisten",
 });
 
 // How a program's end is reported by the SDK, and the status a program
@@ -66,6 +72,10 @@ const LOST_STATUS = 255;
 // a waiting sender looks again.
 const SEND_HIGH_WATER = 1 << 20;
 const SEND_POLL_MS = 5;
+
+// How long an inbound connection whose outside has finished sending may
+// stay quiet before the page ends it.
+const INBOUND_QUIET_MS = 30000;
 
 const control = new WebSocket(new URL(CONTROL_URL, location.href).href.replace(/^http/, "ws"));
 control.binaryType = "arraybuffer";
@@ -287,6 +297,126 @@ function supervisorNet() {
   };
 }
 
+// Open a connection to a port in the guest for the supervisor, which
+// accepted one from outside and cannot reach into the guest itself. The
+// page answers on a WebSocket that names the request, and copies bytes
+// both ways. Either side finishing its sending is passed on as that:
+// the other may still have an answer to send.
+async function connectInbound(vm, id, port) {
+  // The guest's side first. The supervisor sends the outside's bytes
+  // the moment the WebSocket below opens, so everything that receives
+  // them has to exist by then.
+  let guest = null;
+  let failure = null;
+  try {
+    guest = await vm.connect(port);
+  } catch (error) {
+    failure = error;
+  }
+
+  const url = new URL(INBOUND_URL, location.href).href.replace(/^http/, "ws");
+  const socket = new WebSocket(`${url}?id=${encodeURIComponent(id)}`);
+  socket.binaryType = "arraybuffer";
+
+  // Nothing listens on the port, or the guest refused: the supervisor
+  // is told, and drops the outside's connection.
+  if (failure !== null) {
+    socket.onopen = () => {
+      socket.send(JSON.stringify({ t: "error", message: String(failure?.message ?? failure) }));
+      socket.close();
+    };
+    return;
+  }
+
+  // Outside to guest, in order. The outside finishing its sending is
+  // not passed into the guest: the guest's side of this connection
+  // takes an end of input as the end of the connection, and a client
+  // that sends a request, says it is done and waits for the answer
+  // would be cut off before the answer. The connection ends when the
+  // guest's side does, or after it has been quiet for a while with the
+  // outside already done.
+  const writer = guest.writable.getWriter();
+  let writes = Promise.resolve();
+  const ignore = () => {};
+  let outsideDone = false;
+  let quiet = null;
+  const restartQuiet = () => {
+    clearTimeout(quiet);
+    if (outsideDone) {
+      quiet = setTimeout(() => socket.close(), INBOUND_QUIET_MS);
+    }
+  };
+  socket.onmessage = (message) => {
+    if (typeof message.data === "string") {
+      outsideDone = true;
+      restartQuiet();
+      return;
+    }
+    const data = new Uint8Array(message.data);
+    writes = writes.then(() => writer.write(data)).catch(ignore);
+  };
+  socket.onclose = () => {
+    clearTimeout(quiet);
+    guest.close();
+  };
+  await new Promise((resolve, reject) => {
+    socket.onopen = resolve;
+    socket.onerror = () => reject(new Error("no inbound connection to the supervisor"));
+  });
+
+  // Guest to outside.
+  const reader = guest.readable.getReader();
+  try {
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) {
+        break;
+      }
+      while (socket.bufferedAmount > SEND_HIGH_WATER) {
+        await new Promise((resolve) => setTimeout(resolve, SEND_POLL_MS));
+      }
+      socket.send(value);
+      restartQuiet();
+    }
+    if (socket.readyState === WebSocket.OPEN) {
+      socket.send(JSON.stringify({ t: "end" }));
+    }
+  } catch {
+    socket.close();
+  }
+}
+
+// Watch which ports the container's program listens on, and tell the
+// supervisor, which listens on the same ports outside. Init prints a
+// line per change, "+80" or "-80".
+async function watchPorts(vm) {
+  const watcher = await vm.spawn(`${BIN_DIR}/${INIT_NAME}`, [PORTS_FLAG], {
+    pty: false,
+    user: "root",
+    cwd: "/",
+  });
+  watcher.stderr.cancel();
+
+  const reader = watcher.stdout.pipeThrough(new TextDecoderStream()).getReader();
+  let pending = "";
+  for (;;) {
+    const { value, done } = await reader.read();
+    if (done) {
+      return;
+    }
+    pending += value;
+    const lines = pending.split("\n");
+    pending = lines.pop();
+    for (const line of lines) {
+      const port = Number(line.slice(1));
+      if (!Number.isInteger(port) || port <= 0) {
+        continue;
+      }
+      tell(line[0] === "+" ? ToSupervisor.LISTEN : ToSupervisor.UNLISTEN, { port });
+    }
+  }
+}
+
 // Send one chunk of a program's output, after waiting for the socket to
 // have room: the program's output stream is only read as fast as the
 // supervisor takes it.
@@ -390,6 +520,9 @@ async function main() {
   const start = new Promise((resolve) => {
     started = resolve;
   });
+  // The guest, once there is one, for requests that are about the guest
+  // and not about the program.
+  let guest = null;
   const dispatch = (message) => {
     if (message instanceof ArrayBuffer) {
       incoming.onInput(new Uint8Array(message).subarray(1));
@@ -405,9 +538,18 @@ async function main() {
     }
   };
   control.onmessage = (event) => {
-    if (typeof event.data === "string" && JSON.parse(event.data).t === FromSupervisor.START) {
-      started();
-      return;
+    if (typeof event.data === "string") {
+      const { t, id, port } = JSON.parse(event.data);
+      if (t === FromSupervisor.START) {
+        started();
+        return;
+      }
+      if (t === FromSupervisor.CONNECT) {
+        connectInbound(guest, id, port).catch((error) =>
+          tell(ToSupervisor.LOG, { message: `inbound to port ${port}: ${error}` }),
+        );
+        return;
+      }
     }
     if (incoming.onInput === null) {
       incoming.pending.push(event.data);
@@ -441,8 +583,13 @@ async function main() {
   });
 
   // The guest is up and the image is mounted: the container is created.
+  guest = vm;
   tell(ToSupervisor.READY);
   await start;
+
+  if (config.mirrorPorts) {
+    watchPorts(vm).catch((error) => tell(ToSupervisor.LOG, { message: `port watcher: ${error}` }));
+  }
 
   const running = config.terminal ? runOnTerminal(vm, config, incoming) : runOnPipes(vm, incoming);
 

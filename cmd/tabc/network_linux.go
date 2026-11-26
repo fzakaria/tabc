@@ -11,6 +11,7 @@ import (
 	"golang.org/x/sys/unix"
 
 	"github.com/fzakaria/tabc/internal/bundle"
+	"github.com/fzakaria/tabc/internal/cli"
 )
 
 // startInNetwork starts the supervisor inside the container's network
@@ -28,6 +29,13 @@ func startInNetwork(process *exec.Cmd, loaded *bundle.Bundle) error {
 		return process.Start()
 	}
 
+	// In a namespace of the container's own, the supervisor listens on
+	// every port the container's program opens: the namespace's address
+	// is the container's, and those ports are what the engine's bridge,
+	// its published ports and its other containers connect to.
+	plain := append([]string{}, process.Args...)
+	process.Args = withMirrorPorts(process.Args)
+
 	// A new namespace, made as the supervisor is.
 	if path == "" {
 		process.SysProcAttr.Unshareflags |= syscall.CLONE_NEWNET
@@ -39,6 +47,7 @@ func startInNetwork(process *exec.Cmd, loaded *bundle.Bundle) error {
 		// privilege.
 		if errors.Is(err, syscall.EPERM) && os.Geteuid() != 0 {
 			process.SysProcAttr.Unshareflags &^= syscall.CLONE_NEWNET
+			process.Args = plain
 			fmt.Fprintln(os.Stderr, "tabc: no privilege to make a network namespace; the container uses the host's network")
 			return process.Start()
 		}
@@ -65,4 +74,14 @@ func startInNetwork(process *exec.Cmd, loaded *bundle.Bundle) error {
 		started <- process.Start()
 	}()
 	return <-started
+}
+
+// withMirrorPorts returns a supervisor's arguments with the flag that
+// has the supervisor mirror the container's ports, placed before the
+// container's id, which comes last.
+func withMirrorPorts(args []string) []string {
+	last := len(args) - 1
+	mirrored := append([]string{}, args[:last]...)
+	mirrored = append(mirrored, "--"+cli.FlagMirrorPorts)
+	return append(mirrored, args[last])
 }
