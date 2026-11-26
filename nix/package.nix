@@ -45,8 +45,10 @@ let
     ++ lib.optional (target == null) "-X main.dockerBuilt=${docker}/bin/docker";
 
     # tocker is tabc under another name: the docker command line,
-    # pointed at tabc's own daemon.
-    postInstall = ''
+    # pointed at tabc's own daemon. A cross-compiled tabc is not in
+    # bin/ yet, where the link would dangle and fail the build, and
+    # gets its link where it is moved there, below.
+    postInstall = lib.optionalString (target == null) ''
       ln -s tabc $out/bin/tocker
     '';
 
