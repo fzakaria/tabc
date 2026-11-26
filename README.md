@@ -83,32 +83,31 @@ The container opens as a tab you can see, with a terminal in it. Type
 in the tab or in the terminal you started it from; each shows the
 other. `--link` prints the address and waits for you to open it.
 
-### Compose, with no Docker
+### Compose, without Docker
 
-`tocker` is the Docker command line pointed at tabc. It starts a small
-daemon of tabc's own and then becomes the real `docker`, so every
-command you know works, Compose included.
+The `docker` program is only a client: every command is a request to a
+daemon that remembers which containers exist. On a Mac there is no
+such daemon, so tabc has one. `tocker` starts it if it isn't running
+and then becomes the real `docker`, so every command you know works,
+Compose included.
 
 ```console
-$ tocker run -it alpine sh
+$ nix run github:fzakaria/tabc#tocker -- run -it alpine sh
 $ tocker compose up
 $ tocker --dashboard compose up   # every service as a pane in one page
-$ tocker --stop
+$ tocker --stop                   # stop the daemon and its containers
 ```
 
-[examples/compose](examples/compose) is a web server and the Redis it
-counts its visits in.
+Nothing in your `compose.yaml` changes. [examples/compose](examples/compose)
+is a web server and the Redis it counts its visits in.
 
-### As Docker's runtime
+### With Docker, as its runtime
 
+If you do have Docker, tabc can be the runtime it uses instead of runc.
 Register it in `/etc/docker/daemon.json` and restart the daemon:
 
 ```json
 { "runtimes": { "tabc": { "path": "/path/to/tabc" } } }
-```
-
-```console
-$ docker run --rm -it --runtime tabc --platform linux/arm64 debian bash
 ```
 
 On NixOS that is one line:
@@ -117,8 +116,25 @@ On NixOS that is one line:
 virtualisation.docker.daemon.settings.runtimes.tabc.path = "${tabc}/bin/tabc";
 ```
 
-Docker's networks, `-p`, volumes and Compose then work as they do with
-runc: add `runtime: tabc` to a service. Podman needs no setup:
+Then name it per container:
+
+```console
+$ docker run --rm -it --runtime tabc --platform linux/arm64 debian bash
+```
+
+For Compose the runtime is a line on each service, not a flag to
+`docker compose up`:
+
+```yaml
+services:
+  web:
+    image: python:3.13-alpine
+    runtime: tabc
+    platform: linux/arm64
+```
+
+Docker's networks, `-p` and volumes then work as they do with runc.
+Podman needs no setup:
 
 ```console
 $ podman run --rm --runtime /path/to/tabc --platform linux/arm64 alpine echo hi

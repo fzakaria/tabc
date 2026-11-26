@@ -52,6 +52,15 @@
         }
       );
 
+      apps = forAllSystems (system: {
+        # the Docker command line pointed at tabc:
+        # `nix run github:fzakaria/tabc#tocker -- compose up`
+        tocker = {
+          type = "app";
+          program = "${self.packages.${system}.tabc}/bin/tocker";
+        };
+      });
+
       checks = forAllSystems (
         system:
         let
