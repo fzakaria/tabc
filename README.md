@@ -51,7 +51,6 @@ $ tocker compose up
 
 <p align="center"><a href="docs/img/compose.webp"><img src="docs/img/compose.webp" width="480" alt="A terminal runs tocker compose up; a Chromium window under it shows a pane per service, Redis starting in one and a web server in the other. A second tab loads the web service and its count goes up."></a></p>
 
-
 ## Install
 
 With Nix, on Linux or an Apple Silicon Mac:
