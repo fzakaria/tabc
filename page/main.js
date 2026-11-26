@@ -8,7 +8,7 @@
 // supervisor over one WebSocket, and its input, signals and window
 // size come back the same way.
 
-import { createKernel, FsError, MemoryFs } from "./unkernel/web.mjs";
+import { checkSupport, createKernel, FsError, MemoryFs } from "./unkernel/web.mjs";
 
 // What the supervisor serves next to this page.
 const CONFIG_URL = "config.json";
@@ -174,7 +174,12 @@ function tell(type, fields = {}) {
 // Anything that goes wrong here ends the container: the supervisor
 // reports the message and exits.
 function fatal(error) {
-  const message = error?.stack ?? String(error);
+  // What went wrong first, then where. A stack alone is not enough:
+  // Firefox's does not begin with the error's message, as Chromium's
+  // does.
+  const what = error?.message ?? String(error);
+  const where = error?.stack ?? "";
+  const message = where.includes(what) ? where : `${what}\n${where}`;
   setStatus(State.FAILED, "failed");
   show(`\r\n${RED}${message.replaceAll("\n", "\r\n")}${PLAIN}\r\n`);
   if (control.readyState === WebSocket.OPEN) {
@@ -722,6 +727,17 @@ async function main() {
   const bin = new MemoryFs();
   bin.writeFile(`/${INIT_NAME}`, new Uint8Array(init), { mode: EXECUTABLE });
   bin.writeFile(`/${SPEC_NAME}`, spec);
+
+  // A browser that cannot run the kernel is told so in its own words,
+  // before the kernel fails in the kernel's. This is what a person who
+  // opened the page in a browser of their own needs to read.
+  const support = await checkSupport();
+  if (!support.ok) {
+    throw new Error(
+      `This browser cannot run the container: ${support.problems.join("; ")}. ` +
+        "A recent Chrome or Chromium can.",
+    );
+  }
 
   // The log's timestamps are how a start-up's time is accounted for.
   tell(ToSupervisor.LOG, { message: "booting the kernel" });
