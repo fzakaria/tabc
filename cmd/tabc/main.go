@@ -51,6 +51,7 @@ const (
 	commandKill     = "kill"
 	commandDelete   = "delete"
 	commandFeatures = "features"
+	commandList     = "list"
 )
 
 // exitError is tabc's own failure status, apart from a program's.
@@ -99,6 +100,8 @@ func main() {
 		err = remove(inv)
 	case commandFeatures:
 		err = printFeatures()
+	case commandList:
+		err = printList(inv, os.Stdout)
 	case cli.CommandRun:
 		// With a bundle, run is the lifecycle in one command. Without
 		// one, the words after run name an image and a program.

@@ -355,7 +355,7 @@ func runImage(args []string) (int, error) {
 	for _, network := range parsed.networks {
 		planned.Networks = append(planned.Networks, plan.Network{Name: network, Names: names})
 	}
-	record := state.Container{ID: id, Status: state.Creating, Created: time.Now().UTC()}
+	record := state.Container{ID: id, Name: parsed.name, Status: state.Creating, Created: time.Now().UTC()}
 	process, dir, err := runner.Create(record, planned, runner.Launch{
 		Root:  root,
 		ID:    id,

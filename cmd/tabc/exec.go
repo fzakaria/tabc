@@ -28,7 +28,7 @@ import (
 
 // exec runs a second program in a running container:
 //
-//	tabc exec [-it] [-e NAME=value] [-w dir] [-u user[:group]] <id> <program> [arguments]
+//	tabc exec [-it] [-e NAME=value] [-w dir] [-u user[:group]] <id or name> <program> [arguments]
 //
 // and, as an engine calls it, with the program described in a file and
 // the command itself gone once the program is running:
@@ -236,10 +236,13 @@ func execCommand(inv cli.Invocation, args []string) (int, error) {
 		return 0, err
 	}
 	root := state.Root(inv.Root)
-	record, err := state.Load(root, options.id)
+	// The container by its id, or by the name `tabc run` gave it. What
+	// follows goes by the id the record has.
+	record, err := state.Find(root, options.id)
 	if err != nil {
 		return 0, err
 	}
+	options.id = record.ID
 	if record.Status != state.Running {
 		return 0, fmt.Errorf("container %q is %s, not running", options.id, record.Status)
 	}

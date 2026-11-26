@@ -109,6 +109,9 @@ pkgs.runCommand "tabc-e2e"
       exit 1
     fi
 
+    echo "list"
+    tabc --root "$PWD/state" list | grep -q '^long .* running '
+
     echo "exec: a program that is not there"
     status=0
     inside long no-such-program 2> /dev/null || status=$?

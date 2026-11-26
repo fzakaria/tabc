@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"syscall"
 	"time"
@@ -58,7 +59,11 @@ const (
 
 // Container is one container's record.
 type Container struct {
-	ID          string            `json:"id"`
+	ID string `json:"id"`
+	// Name is what a person called the container (`tabc run --name`),
+	// and may be given wherever a person gives an id. Empty for a
+	// container an engine made: an engine keeps its own names.
+	Name        string            `json:"name,omitempty"`
 	Bundle      string            `json:"bundle"`
 	Pid         int               `json:"pid"`
 	Status      Status            `json:"status"`
@@ -191,4 +196,62 @@ func alive(pid int) bool {
 	}
 	err := syscall.Kill(pid, 0)
 	return err == nil || errors.Is(err, syscall.EPERM)
+}
+
+// List returns every container under root, oldest first. A root that
+// does not exist has none.
+func List(root string) ([]Container, error) {
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, nil
+		}
+		return nil, err
+	}
+
+	var containers []Container
+	for _, entry := range entries {
+		// A leading dot is what the root holds besides containers, and
+		// a directory with no record yet is a container being made.
+		if !entry.IsDir() || strings.HasPrefix(entry.Name(), ".") {
+			continue
+		}
+		record, err := Load(root, entry.Name())
+		if err != nil {
+			continue
+		}
+		containers = append(containers, record)
+	}
+	sort.Slice(containers, func(i, j int) bool {
+		return containers[i].Created.Before(containers[j].Created)
+	})
+	return containers, nil
+}
+
+// Find returns the container a person means by a reference: the one
+// with that id, else the one with that name. A name two containers
+// share finds neither, since nothing says which was meant.
+func Find(root, reference string) (Container, error) {
+	if record, err := Load(root, reference); err == nil {
+		return record, nil
+	}
+
+	containers, err := List(root)
+	if err != nil {
+		return Container{}, err
+	}
+	var named []Container
+	for _, record := range containers {
+		if record.Name == reference {
+			named = append(named, record)
+		}
+	}
+	switch len(named) {
+	case 0:
+		return Container{}, fmt.Errorf("container %q does not exist", reference)
+	case 1:
+		return named[0], nil
+	default:
+		return Container{}, fmt.Errorf("%d containers are named %q; give an id (tabc list)", len(named), reference)
+	}
 }
