@@ -35,6 +35,7 @@ const (
 	routeNet      = "net"
 	routeInbound  = "in"
 	routeRelay    = "relay"
+	routeExec     = "ex"
 	routeVolume   = "vol"
 	routeUnkernel = "unkernel"
 	routeXterm    = "xterm"
@@ -85,6 +86,7 @@ type server struct {
 	files    fileServer
 	session  *session
 	inbound  *inbound
+	execs    *execs
 	resolver *net.Resolver
 
 	// volumes are the directories of the host the container mounts, in
@@ -145,6 +147,8 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		s.inbound.serve(w, r)
 	case routeRelay:
 		s.inbound.serveRelay(w, r)
+	case routeExec:
+		s.execs.serve(w, r)
 	case routeVolume:
 		// vol/<number>/<operation>.
 		number, op, _ := strings.Cut(remainder, "/")

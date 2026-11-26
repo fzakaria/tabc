@@ -243,6 +243,9 @@ func run(options Options, dir string, logger *log.Logger, logFile *os.File) (int
 			}
 		}
 	}
+	// Second programs, which `tabc exec` asks for once the container's
+	// own is running.
+	second := newExecs(conversation, guestSpec, terminalType, logger.Printf)
 	pages := &server{
 		token: token,
 		share: options.Share,
@@ -262,6 +265,7 @@ func run(options Options, dir string, logger *log.Logger, logFile *os.File) (int
 		files:    rootfs.Handler{Tree: tree},
 		session:  conversation,
 		inbound:  incoming,
+		execs:    second,
 		resolver: resolverFor(planned.ResolvConfPath),
 		root:     options.Root,
 		networks: networkNames(planned.Networks),
@@ -319,7 +323,7 @@ func run(options Options, dir string, logger *log.Logger, logFile *os.File) (int
 		default:
 			return fmt.Errorf("unknown request %q", words[0])
 		}
-	})
+	}, map[string]takeover{requestExec: second.handle})
 
 	// The browser: a headless one of the container's own, or whichever
 	// browser is going to be shown the page.
@@ -449,6 +453,7 @@ func run(options Options, dir string, logger *log.Logger, logFile *os.File) (int
 	if err := state.Save(dir, record); err != nil {
 		logger.Printf("state: %v", err)
 	}
+	second.running.Store(true)
 	logger.Printf("running")
 
 	go pumpInput(stdin, conversation, hasTerminal, logger)

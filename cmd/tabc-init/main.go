@@ -85,14 +85,31 @@ const (
 	pathListSeparate = ":"
 )
 
-// flagPorts runs the port watcher (ports.go) in place of a container.
-const flagPorts = "--ports"
+// flagPorts runs the port watcher (ports.go) in place of a container,
+// and flagExec a second program in the container that is already there
+// (exec.go).
+const (
+	flagPorts = "--ports"
+	flagExec  = "--exec"
+)
+
+// usage is what init is called with.
+const usage = "usage: tabc-init <spec.json> | --ports | --exec <spec>"
+
+// The words init is called with, its own name included, for each of
+// its three jobs.
+const (
+	wordsForContainer = 2
+	wordsForExec      = 3
+)
 
 func main() {
-	if len(os.Args) != 2 {
-		fail(exitSetupFailed, errors.New("usage: tabc-init <spec.json> | --ports"))
-	}
-	if os.Args[1] == flagPorts {
+	switch {
+	case len(os.Args) == wordsForExec && os.Args[1] == flagExec:
+		execInContainer(os.Args[2])
+	case len(os.Args) != wordsForContainer:
+		fail(exitSetupFailed, errors.New(usage))
+	case os.Args[1] == flagPorts:
 		watchPorts()
 	}
 
@@ -111,11 +128,20 @@ func main() {
 	if err := bindVolumes(root, spec.Volumes); err != nil {
 		fail(exitSetupFailed, err)
 	}
+	// The root is whole: a second program may be started in it.
+	if err := markReady(); err != nil {
+		fail(exitSetupFailed, err)
+	}
 	if err := enter(root, spec); err != nil {
 		fail(exitSetupFailed, err)
 	}
+	runProgram(spec)
+}
 
-	// From here on every path is the container's.
+// runProgram becomes the spec's user and replaces init with the spec's
+// program. Init is inside the container's root by now, so every path
+// is the container's.
+func runProgram(spec guest.Spec) {
 	env := withHome(spec.Env, spec.UID)
 	if err := becomeUser(spec); err != nil {
 		fail(exitSetupFailed, err)

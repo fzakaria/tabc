@@ -19,6 +19,7 @@ const CONTROL_URL = "ctl";
 const NET_DNS_URL = "net/dns";
 const NET_TCP_URL = "net/tcp";
 const INBOUND_URL = "in";
+const EXEC_URL = "ex";
 const VOLUME_URL = "vol/";
 
 // Where the guest finds the image, and init with the container's spec.
@@ -27,6 +28,8 @@ const BIN_DIR = "/tabc/bin";
 const INIT_NAME = "init";
 // The argument that makes init watch the program's open ports.
 const PORTS_FLAG = "--ports";
+// The argument that makes init run a second program in the container.
+const EXEC_FLAG = "--exec";
 const SPEC_NAME = "spec.json";
 const EXECUTABLE = 0o755;
 
@@ -51,6 +54,7 @@ const FromSupervisor = Object.freeze({
   KILL: "kill",
   RESIZE: "resize",
   CONNECT: "connect",
+  EXEC: "exec",
   WELCOME: "welcome",
   TAKEN: "taken",
 });
@@ -516,6 +520,112 @@ async function connectInbound(vm, id, port) {
   }
 }
 
+// Start a second program in the container for the supervisor, which
+// was asked by `tabc exec`. Like a connection into the guest, the
+// answer is a WebSocket that names the request. The socket carries what
+// the container's own program has on the control socket: input, signals
+// and sizes one way, and output and the exit status the other.
+async function runExec(vm, request) {
+  // The program first. The supervisor sends input the moment the
+  // WebSocket below opens, so what receives the input has to exist by
+  // then.
+  const init = `${BIN_DIR}/${INIT_NAME}`;
+  const args = [EXEC_FLAG, request.spec];
+  let program = null;
+  let failure = null;
+  try {
+    program = request.terminal
+      ? await vm.spawn(init, args, {
+          user: "root",
+          cwd: "/",
+          cols: request.cols,
+          rows: request.rows,
+          term: request.term,
+        })
+      : await vm.spawn(init, args, { pty: false, user: "root", cwd: "/" });
+  } catch (error) {
+    failure = error;
+  }
+
+  const url = new URL(EXEC_URL, location.href).href.replace(/^http/, "ws");
+  const socket = new WebSocket(`${url}?id=${encodeURIComponent(request.id)}`);
+  socket.binaryType = "arraybuffer";
+  const say = (type, fields = {}) => {
+    if (socket.readyState === WebSocket.OPEN) {
+      socket.send(JSON.stringify({ t: type, ...fields }));
+    }
+  };
+
+  // The guest could not start the program: the supervisor is told why.
+  if (failure !== null) {
+    socket.onopen = () => {
+      say(ToSupervisor.ERROR, { message: String(failure?.message ?? failure) });
+      socket.close();
+    };
+    return;
+  }
+
+  // Input, in order, and signals and sizes. On pipes the end of input
+  // is passed on; a terminal has none.
+  const stdin = request.terminal ? null : program.stdin.getWriter();
+  let writes = Promise.resolve();
+  const ignore = () => {};
+  socket.onmessage = (message) => {
+    if (message.data instanceof ArrayBuffer) {
+      const bytes = new Uint8Array(message.data).subarray(1);
+      if (request.terminal) {
+        program.write(bytes);
+        return;
+      }
+      writes = writes.then(() => stdin.write(bytes)).catch(ignore);
+      return;
+    }
+
+    const { t, signal, cols, rows } = JSON.parse(message.data);
+    if (t === FromSupervisor.KILL) {
+      program.kill(signal);
+    } else if (t === FromSupervisor.RESIZE && request.terminal) {
+      program.resize(cols, rows);
+    } else if (t === FromSupervisor.EOF && !request.terminal) {
+      writes = writes.then(() => stdin.close()).catch(ignore);
+    }
+  };
+  await new Promise((resolve, reject) => {
+    socket.onopen = resolve;
+    socket.onerror = () => reject(new Error("no exec connection to the supervisor"));
+  });
+
+  // Output, each chunk under its stream's number, sent only as fast as
+  // the supervisor takes it.
+  const forward = async (readable, stream) => {
+    const reader = readable.getReader();
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done || socket.readyState !== WebSocket.OPEN) {
+        return;
+      }
+      while (socket.bufferedAmount > SEND_HIGH_WATER) {
+        await new Promise((resolve) => setTimeout(resolve, SEND_POLL_MS));
+      }
+      const framed = new Uint8Array(value.length + 1);
+      framed[0] = stream;
+      framed.set(value, 1);
+      socket.send(framed);
+    }
+  };
+  if (request.terminal) {
+    await forward(program.output, Stream.STDOUT);
+  } else {
+    await Promise.all([
+      forward(program.stdout, Stream.STDOUT),
+      forward(program.stderr, Stream.STDERR),
+    ]);
+  }
+
+  say(ToSupervisor.EXIT, { status: statusOf(await program.ended) });
+  socket.close();
+}
+
 // Watch which ports the container's program listens on, and tell the
 // supervisor, which listens on the same ports outside. Init prints a
 // line per change, "+80" or "-80".
@@ -691,9 +801,16 @@ async function main() {
   };
   control.onmessage = (event) => {
     if (typeof event.data === "string") {
-      const { t, id, port } = JSON.parse(event.data);
+      const request = JSON.parse(event.data);
+      const { t, id, port } = request;
       if (t === FromSupervisor.START) {
         started();
+        return;
+      }
+      if (t === FromSupervisor.EXEC) {
+        runExec(guest, request).catch((error) =>
+          tell(ToSupervisor.LOG, { message: `exec: ${error}` }),
+        );
         return;
       }
       if (t === FromSupervisor.CONNECT) {

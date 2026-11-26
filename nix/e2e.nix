@@ -50,5 +50,48 @@ pkgs.runCommand "tabc-e2e"
     echo "the guest is its own machine"
     test "$(run machine uname -m < /dev/null)" = aarch64
 
+    # A second program in a container that is running. The container's
+    # own program leaves a file and waits; each exec is checked the way
+    # a container's program was above.
+    echo "exec"
+    mkdir -p bundles/long
+    ln -s ${bundle}/rootfs bundles/long/rootfs
+    jq '.process.args = ["sh", "-c", "echo first > /tmp/left; sleep 300"]' \
+      < ${bundle}/config.json > bundles/long/config.json
+    tabc --root "$PWD/state" run --bundle bundles/long long < /dev/null &
+    until tabc --root "$PWD/state" state long 2>/dev/null | jq -e '.status == "running"' > /dev/null; do
+      sleep 0.1
+    done
+    inside() {
+      tabc --root "$PWD/state" exec "$@"
+    }
+
+    # Running is when the container's program was started, which is a
+    # moment before the program has left its file.
+    echo "exec: the container's files"
+    until inside long test -f /tmp/left; do
+      sleep 0.1
+    done
+    test "$(inside long cat /tmp/left)" = first
+
+    echo "exec: exit status"
+    status=0
+    inside long sh -c 'exit 9' || status=$?
+    test "$status" = 9
+
+    echo "exec: input, to its end"
+    test "$(echo to the second | inside -i long cat)" = "to the second"
+
+    echo "exec: environment, directory and user"
+    test "$(inside -e WORD=x -w /tmp -u 5:6 long sh -c 'echo $WORD $PWD $(id -u):$(id -g)')" = "x /tmp 5:6"
+
+    echo "exec: a program that is not there"
+    status=0
+    inside long no-such-program 2> /dev/null || status=$?
+    test "$status" = 127
+
+    tabc --root "$PWD/state" kill long KILL
+    wait
+
     touch $out
   ''

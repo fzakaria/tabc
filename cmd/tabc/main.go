@@ -5,6 +5,7 @@
 //	tabc create --bundle <dir> --pid-file <file> <id>
 //	tabc start <id>
 //	tabc state <id>
+//	tabc exec <id> <program> [arguments]
 //	tabc kill <id> <signal>
 //	tabc delete <id>
 //
@@ -107,6 +108,12 @@ func main() {
 		} else {
 			status, err = runImage(argumentsAfter(os.Args[1:], cli.CommandRun))
 		}
+		if err == nil {
+			os.Exit(status)
+		}
+	case commandExec:
+		var status int
+		status, err = execCommand(inv, argumentsAfter(os.Args[1:], commandExec))
 		if err == nil {
 			os.Exit(status)
 		}

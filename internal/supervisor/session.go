@@ -62,6 +62,12 @@ type pageMessage struct {
 	// connection the page is asked to open to one.
 	Port       int    `json:"port,omitempty"`
 	Connection string `json:"id,omitempty"`
+	// Spec, Terminal and Term describe a second program the page is
+	// asked to start (exec.go): what init is told, whether the program
+	// gets a terminal, and the terminal's type.
+	Spec     string `json:"spec,omitempty"`
+	Terminal bool   `json:"terminal,omitempty"`
+	Term     string `json:"term,omitempty"`
 }
 
 // session is the supervisor's conversation with the container's page.

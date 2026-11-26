@@ -21,7 +21,10 @@ const (
 	requestStart  = "start"
 	requestKill   = "kill"
 	requestResize = "resize"
-	answerOK      = "ok"
+	// requestExec runs a second program (exec.go). The connection that
+	// asks stays open and becomes the program's input and output.
+	requestExec = "exec"
+	answerOK    = "ok"
 )
 
 // maxSocketPath is the longest socket path dialled as it is. The limit
@@ -38,6 +41,21 @@ const (
 // Request sends one request to the supervisor listening at path and
 // returns its error, if the supervisor answered with one.
 func Request(path string, words ...string) error {
+	connection, err := dialControl(path)
+	if err != nil {
+		return err
+	}
+	defer connection.Close()
+	connection.SetDeadline(time.Now().Add(controlTimeout))
+
+	if _, err := fmt.Fprintln(connection, strings.Join(words, " ")); err != nil {
+		return err
+	}
+	return readAnswer(bufio.NewReader(connection))
+}
+
+// dialControl connects to the supervisor listening at path.
+func dialControl(path string) (net.Conn, error) {
 	// A socket's address holds about a hundred bytes, and a state
 	// directory under an engine's root with a 64-character id comes
 	// close. A path that long is reached by its bare name from its
@@ -49,21 +67,21 @@ func Request(path string, words ...string) error {
 	address := path
 	if len(path) > maxSocketPath {
 		if err := os.Chdir(filepath.Dir(path)); err != nil {
-			return fmt.Errorf("the container's state directory: %w", err)
+			return nil, fmt.Errorf("the container's state directory: %w", err)
 		}
 		address = filepath.Base(path)
 	}
 	connection, err := net.DialTimeout(controlNetwork, address, controlTimeout)
 	if err != nil {
-		return fmt.Errorf("the container's supervisor is not running: %w", err)
+		return nil, fmt.Errorf("the container's supervisor is not running: %w", err)
 	}
-	defer connection.Close()
-	connection.SetDeadline(time.Now().Add(controlTimeout))
+	return connection, nil
+}
 
-	if _, err := fmt.Fprintln(connection, strings.Join(words, " ")); err != nil {
-		return err
-	}
-	answer, err := bufio.NewReader(connection).ReadString('\n')
+// readAnswer reads a supervisor's answer to a request and returns the
+// error the answer is, if the answer is one.
+func readAnswer(reader *bufio.Reader) error {
+	answer, err := reader.ReadString('\n')
 	if err != nil {
 		return fmt.Errorf("the supervisor did not answer: %w", err)
 	}
@@ -90,9 +108,15 @@ func Resize(path string, cols, rows int) error {
 	return Request(path, requestResize, strconv.Itoa(cols), strconv.Itoa(rows))
 }
 
+// takeover serves a request that keeps its connection: the request's
+// words, the connection, and the reader the request's line was read
+// with. A takeover writes the answer itself.
+type takeover func(connection net.Conn, reader *bufio.Reader, words []string)
+
 // serveControl answers requests on the control socket by handing each
-// to handle, whose error, if any, is the answer.
-func serveControl(listener net.Listener, handle func(words []string) error) {
+// to handle, whose error, if any, is the answer. A request named in
+// takeovers is handed its connection instead.
+func serveControl(listener net.Listener, handle func(words []string) error, takeovers map[string]takeover) {
 	for {
 		connection, err := listener.Accept()
 		if err != nil {
@@ -103,11 +127,19 @@ func serveControl(listener net.Listener, handle func(words []string) error) {
 			defer connection.Close()
 			connection.SetDeadline(time.Now().Add(controlTimeout))
 
-			line, err := bufio.NewReader(connection).ReadString('\n')
+			reader := bufio.NewReader(connection)
+			line, err := reader.ReadString('\n')
 			if err != nil {
 				return
 			}
-			if err := handle(strings.Fields(line)); err != nil {
+			words := strings.Fields(line)
+			if len(words) > 0 {
+				if take, has := takeovers[words[0]]; has {
+					take(connection, reader, words)
+					return
+				}
+			}
+			if err := handle(words); err != nil {
 				fmt.Fprintln(connection, err.Error())
 				return
 			}
