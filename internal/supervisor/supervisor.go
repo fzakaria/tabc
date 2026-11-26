@@ -25,6 +25,7 @@ import (
 	"time"
 
 	"github.com/fzakaria/tabc/internal/console"
+	"github.com/fzakaria/tabc/internal/netreg"
 	"github.com/fzakaria/tabc/internal/plan"
 	"github.com/fzakaria/tabc/internal/rootfs"
 	"github.com/fzakaria/tabc/internal/signals"
@@ -229,6 +230,8 @@ func run(options Options, dir string, logger *log.Logger, logFile *os.File) (int
 		session:  conversation,
 		inbound:  incoming,
 		resolver: resolverFor(planned.ResolvConfPath),
+		root:     options.Root,
+		networks: networkNames(planned.Networks),
 	}
 	listener, err := net.Listen("tcp4", loopbackAddress)
 	if err != nil {
@@ -342,6 +345,21 @@ func run(options Options, dir string, logger *log.Logger, logFile *os.File) (int
 			return 0, fmt.Errorf("publishing port %d: %w", published.HostPort, err)
 		}
 	}
+
+	// The container's names on its tabc networks, now that connections
+	// for them have somewhere to go. The files are in the record too, so
+	// a container whose supervisor was killed still leaves its networks.
+	relay := strings.Replace(pages.pageURL(listener), "http://", "ws://", 1) + routeRelay
+	for _, network := range planned.Networks {
+		files, address, err := netreg.Register(options.Root, network.Name, options.ID, relay, network.Names)
+		record.Registrations = append(record.Registrations, files...)
+		if err != nil {
+			netreg.Unregister(record.Registrations)
+			return 0, fmt.Errorf("joining network %s: %w", network.Name, err)
+		}
+		logger.Printf("on network %s as %s at %s", network.Name, strings.Join(network.Names, ", "), address)
+	}
+	defer netreg.Unregister(record.Registrations)
 
 	record.Status = state.Created
 	if err := state.Save(dir, record); err != nil {
@@ -566,4 +584,14 @@ func orTitle(title, id string) string {
 		return id
 	}
 	return title
+}
+
+// networkNames returns the names of the networks a plan puts the
+// container on.
+func networkNames(networks []plan.Network) []string {
+	names := make([]string, 0, len(networks))
+	for _, network := range networks {
+		names = append(names, network.Name)
+	}
+	return names
 }

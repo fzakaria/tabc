@@ -82,10 +82,21 @@ type Plan struct {
 	// Publish are ports of the host forwarded to ports of the guest.
 	Publish []Publish `json:"publish,omitempty"`
 
+	// Networks are the tabc networks the container is on, for
+	// containers no engine gave a network (internal/netreg).
+	Networks []Network `json:"networks,omitempty"`
+
 	// Browser is who loads the container's page, and Title what the
 	// page calls the container.
 	Browser Browser `json:"browser,omitempty"`
 	Title   string  `json:"title,omitempty"`
+}
+
+// Network is one tabc network a container is on, and the names other
+// containers on the network reach the container by.
+type Network struct {
+	Name  string   `json:"name"`
+	Names []string `json:"names"`
 }
 
 // Publish is one port of the host forwarded to a port of the guest.

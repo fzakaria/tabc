@@ -33,6 +33,7 @@ const (
 	routeControl  = "ctl"
 	routeNet      = "net"
 	routeInbound  = "in"
+	routeRelay    = "relay"
 	routeUnkernel = "unkernel"
 	netLookup     = "dns"
 	netConnect    = "tcp"
@@ -73,6 +74,11 @@ type server struct {
 	session  *session
 	inbound  *inbound
 	resolver *net.Resolver
+
+	// root and networks are where and on which tabc networks the
+	// container's neighbours are looked for (internal/netreg).
+	root     string
+	networks []string
 }
 
 // newToken returns a fresh secret.
@@ -121,6 +127,8 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		s.serveNet(w, r, remainder)
 	case routeInbound:
 		s.inbound.serve(w, r)
+	case routeRelay:
+		s.inbound.serveRelay(w, r)
 	case routeUnkernel:
 		s.serveShared(w, r, assets.Unkernel, remainder)
 	default:

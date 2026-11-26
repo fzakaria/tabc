@@ -56,6 +56,8 @@ type imageRun struct {
 	user        string
 	memory      int64
 	publish     []plan.Publish
+	name        string
+	networks    []string
 	image       string
 	command     []string
 }
@@ -113,6 +115,12 @@ func parseImageRun(args []string) (imageRun, error) {
 			parsed.cwd, err = value(name, inline, hasInline)
 		case "-u", "--user":
 			parsed.user, err = value(name, inline, hasInline)
+		case "--name":
+			parsed.name, err = value(name, inline, hasInline)
+		case "--network":
+			var network string
+			network, err = value(name, inline, hasInline)
+			parsed.networks = append(parsed.networks, network)
 		case "-p", "--publish":
 			var text string
 			text, err = value(name, inline, hasInline)
@@ -134,7 +142,7 @@ func parseImageRun(args []string) (imageRun, error) {
 			return parsed, err
 		}
 	}
-	return parsed, errors.New("usage: tabc run [-it] [--open] [--pull] [-p [address:]host:container] [-e NAME=value] [-w dir] [-u user] [-m memory] <image> [program...]")
+	return parsed, errors.New("usage: tabc run [-it] [--open] [--pull] [--name name] [--network network] [-p [address:]host:container] [-e NAME=value] [-w dir] [-u user] [-m memory] <image> [program...]")
 }
 
 // parsePublish reads a published port as `docker run -p` writes one:
@@ -270,6 +278,16 @@ func runImage(args []string) (int, error) {
 		return 0, err
 	}
 	root := state.Root("")
+
+	// On each network the container answers to its id and, if it was
+	// given one, its name.
+	names := []string{id}
+	if parsed.name != "" {
+		names = append(names, parsed.name)
+	}
+	for _, network := range parsed.networks {
+		planned.Networks = append(planned.Networks, plan.Network{Name: network, Names: names})
+	}
 	record := state.Container{ID: id, Status: state.Creating, Created: time.Now().UTC()}
 	process, dir, err := createContainer(record, planned, launch{
 		root:  root,

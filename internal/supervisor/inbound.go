@@ -208,6 +208,117 @@ func (in *inbound) serve(w http.ResponseWriter, r *http.Request) {
 	<-guest.done
 }
 
+// A relay is one supervisor carrying a connection to another's guest,
+// for containers that share a tabc network and no engine's bridge
+// (internal/netreg). The asking supervisor opens a WebSocket to the
+// other's relay address naming a port, and from there the connection
+// is an inbound one like any other.
+
+// paramRelayPort is the port in the guest a relayed connection is for.
+const paramRelayPort = "port"
+
+// serveRelay takes a connection from another container's supervisor
+// and carries it into this container's guest.
+func (in *inbound) serveRelay(w http.ResponseWriter, r *http.Request) {
+	port, err := strconv.Atoi(r.URL.Query().Get(paramRelayPort))
+	if err != nil || port <= 0 {
+		http.Error(w, "a port is required", http.StatusBadRequest)
+		return
+	}
+
+	socket, err := websocket.Accept(w, r, nil)
+	if err != nil {
+		return
+	}
+	socket.SetReadLimit(maxMessage)
+	neighbour := newRelayConn(context.WithoutCancel(r.Context()), socket)
+	defer neighbour.Close()
+
+	if err := in.forward(neighbour, port); err != nil {
+		in.logf("relayed to port %d: %v", port, err)
+	}
+}
+
+// dialRelay opens a connection to a port of a neighbour's guest through
+// the neighbour's supervisor, whose relay address the registry gave.
+func dialRelay(ctx context.Context, relay string, port int) (net.Conn, error) {
+	address := relay + "?" + paramRelayPort + "=" + strconv.Itoa(port)
+	dialCtx, cancel := context.WithTimeout(ctx, dialTimeout)
+	defer cancel()
+
+	socket, _, err := websocket.Dial(dialCtx, address, nil)
+	if err != nil {
+		return nil, fmt.Errorf("the neighbour's supervisor: %w", err)
+	}
+	socket.SetReadLimit(maxMessage)
+	return newRelayConn(context.WithoutCancel(ctx), socket), nil
+}
+
+// halfCloser is a connection whose sending side can be finished while
+// its receiving side stays open: a TCP connection, or a relayed one.
+type halfCloser interface {
+	CloseWrite() error
+}
+
+// relayConn is a relayed connection as a net.Conn. Bytes are binary
+// messages. One side finishing its sending is a text message, which
+// the other side reads as the end of input, so that a client can send
+// a request, say it is done, and still read the answer, across a relay
+// as across TCP.
+type relayConn struct {
+	net.Conn
+	ctx    context.Context
+	socket *websocket.Conn
+
+	// pending is what is left of the message being read.
+	pending []byte
+	ended   bool
+}
+
+func newRelayConn(ctx context.Context, socket *websocket.Conn) *relayConn {
+	return &relayConn{ctx: ctx, socket: socket}
+}
+
+func (c *relayConn) Read(buffer []byte) (int, error) {
+	for len(c.pending) == 0 {
+		if c.ended {
+			return 0, io.EOF
+		}
+		kind, data, err := c.socket.Read(c.ctx)
+		if err != nil {
+			// The other side closing the socket is the end too.
+			c.ended = true
+			return 0, io.EOF
+		}
+		if kind == websocket.MessageText {
+			c.ended = true
+			return 0, io.EOF
+		}
+		c.pending = data
+	}
+
+	count := copy(buffer, c.pending)
+	c.pending = c.pending[count:]
+	return count, nil
+}
+
+func (c *relayConn) Write(data []byte) (int, error) {
+	if err := c.socket.Write(c.ctx, websocket.MessageBinary, data); err != nil {
+		return 0, err
+	}
+	return len(data), nil
+}
+
+// CloseWrite says this side has no more to send.
+func (c *relayConn) CloseWrite() error {
+	end, _ := json.Marshal(inboundMessage{Type: inboundEnd})
+	return c.socket.Write(c.ctx, websocket.MessageText, end)
+}
+
+func (c *relayConn) Close() error {
+	return c.socket.Close(websocket.StatusNormalClosure, "")
+}
+
 // inboundMessage is a text message on an inbound connection.
 type inboundMessage struct {
 	Type    string `json:"t"`
@@ -270,8 +381,8 @@ func relay(host net.Conn, guest *websocket.Conn) error {
 			}
 			switch message.Type {
 			case inboundEnd:
-				if tcp, ok := host.(*net.TCPConn); ok {
-					tcp.CloseWrite()
+				if closer, ok := host.(halfCloser); ok {
+					closer.CloseWrite()
 				}
 				failed <- nil
 				return

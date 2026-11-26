@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 )
@@ -71,6 +72,10 @@ type Container struct {
 	// URL is the container's page, set when a browser the supervisor
 	// did not start is to load it.
 	URL string `json:"url,omitempty"`
+
+	// Registrations are the files that put the container on tabc
+	// networks (internal/netreg), removed with the container.
+	Registrations []string `json:"registrations,omitempty"`
 }
 
 // Root returns the directory state is kept under: the one given, else
@@ -100,7 +105,8 @@ func Dir(root, id string) string {
 
 // Create makes a container's directory, and fails if the id is taken.
 func Create(root, id string) (string, error) {
-	if id == "" || id != filepath.Base(id) || id == "." || id == ".." {
+	// A leading dot is kept for what the root holds besides containers.
+	if id == "" || id != filepath.Base(id) || strings.HasPrefix(id, ".") {
 		return "", fmt.Errorf("invalid container id %q", id)
 	}
 	if err := os.MkdirAll(root, dirMode); err != nil {
@@ -158,8 +164,13 @@ func Load(root, id string) (Container, error) {
 // Remove deletes a container's directory, and the browser's profile if
 // the record names one elsewhere.
 func Remove(root, id string) error {
-	if record, err := Load(root, id); err == nil && record.Profile != "" {
-		os.RemoveAll(record.Profile)
+	if record, err := Load(root, id); err == nil {
+		if record.Profile != "" {
+			os.RemoveAll(record.Profile)
+		}
+		for _, file := range record.Registrations {
+			os.Remove(file)
+		}
 	}
 	return os.RemoveAll(Dir(root, id))
 }

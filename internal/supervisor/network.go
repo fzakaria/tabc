@@ -15,6 +15,8 @@ import (
 	"time"
 
 	"github.com/coder/websocket"
+
+	"github.com/fzakaria/tabc/internal/netreg"
 )
 
 // The guest's network. The page's network stack ends the guest's
@@ -139,7 +141,16 @@ func (s *server) serveLookup(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), lookupTimeout)
 	defer cancel()
 
-	addresses, err := s.resolver.LookupIP(ctx, networkIP4, r.URL.Query().Get(paramName))
+	// A neighbour on one of the container's own networks first: its
+	// address exists only in the registry, and no resolver knows it.
+	name := r.URL.Query().Get(paramName)
+	if neighbour, found := netreg.Lookup(s.root, s.networks, name); found {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode([]string{neighbour.IP})
+		return
+	}
+
+	addresses, err := s.resolver.LookupIP(ctx, networkIP4, name)
 	if err != nil || len(addresses) == 0 {
 		http.Error(w, "no such host", http.StatusNotFound)
 		return
@@ -179,8 +190,7 @@ func (s *server) serveConnection(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// The dial is the guest's connect: its failure is the guest's reset.
-	dialer := net.Dialer{Timeout: dialTimeout}
-	peer, err := dialer.DialContext(ctx, networkTCP4, net.JoinHostPort(host, strconv.Itoa(port)))
+	peer, err := s.dial(ctx, host, port)
 	if err != nil {
 		send(netMessage{Type: netError, Message: err.Error()})
 		socket.Close(websocket.StatusNormalClosure, "")
@@ -218,8 +228,8 @@ func (s *server) serveConnection(w http.ResponseWriter, r *http.Request) {
 			}
 			switch message.Type {
 			case netEnd:
-				if tcp, ok := peer.(*net.TCPConn); ok {
-					tcp.CloseWrite()
+				if closer, ok := peer.(halfCloser); ok {
+					closer.CloseWrite()
 				}
 			case netAck:
 				credit.give(message.Count)
@@ -256,6 +266,18 @@ func (s *server) serveConnection(w http.ResponseWriter, r *http.Request) {
 		socket.Close(websocket.StatusNormalClosure, "")
 		return
 	}
+}
+
+// dial opens a connection for the guest: to a neighbour's supervisor
+// when the address is a neighbour's in the registry, and to the address
+// itself otherwise.
+func (s *server) dial(ctx context.Context, host string, port int) (net.Conn, error) {
+	if neighbour, found := netreg.ByAddress(s.root, s.networks, host); found {
+		return dialRelay(ctx, neighbour.Relay, port)
+	}
+
+	dialer := net.Dialer{Timeout: dialTimeout}
+	return dialer.DialContext(ctx, networkTCP4, net.JoinHostPort(host, strconv.Itoa(port)))
 }
 
 // credit counts the bytes on their way to the guest against a window.

@@ -77,10 +77,6 @@ const SEND_POLL_MS = 5;
 // scroll into view.
 const FOLLOW_SLACK_PX = 40;
 
-// How long an inbound connection whose outside has finished sending may
-// stay quiet before the page ends it.
-const INBOUND_QUIET_MS = 30000;
-
 // What the page shows of the container: its name, how it is doing, and
 // what the program printed. The states are the status dot's colours
 // (index.html).
@@ -394,36 +390,20 @@ async function connectInbound(vm, id, port) {
   }
 
   // Outside to guest, in order. The outside finishing its sending is
-  // not passed into the guest: the guest's side of this connection
-  // takes an end of input as the end of the connection, and a client
-  // that sends a request, says it is done and waits for the answer
-  // would be cut off before the answer. The connection ends when the
-  // guest's side does, or after it has been quiet for a while with the
-  // outside already done.
+  // passed on as that, an end of input on the guest's side, and the
+  // connection stays: the guest may still have an answer to send.
   const writer = guest.writable.getWriter();
   let writes = Promise.resolve();
   const ignore = () => {};
-  let outsideDone = false;
-  let quiet = null;
-  const restartQuiet = () => {
-    clearTimeout(quiet);
-    if (outsideDone) {
-      quiet = setTimeout(() => socket.close(), INBOUND_QUIET_MS);
-    }
-  };
   socket.onmessage = (message) => {
     if (typeof message.data === "string") {
-      outsideDone = true;
-      restartQuiet();
+      writes = writes.then(() => writer.close()).catch(ignore);
       return;
     }
     const data = new Uint8Array(message.data);
     writes = writes.then(() => writer.write(data)).catch(ignore);
   };
-  socket.onclose = () => {
-    clearTimeout(quiet);
-    guest.close();
-  };
+  socket.onclose = () => guest.close();
   await new Promise((resolve, reject) => {
     socket.onopen = resolve;
     socket.onerror = () => reject(new Error("no inbound connection to the supervisor"));
@@ -441,7 +421,6 @@ async function connectInbound(vm, id, port) {
         await new Promise((resolve) => setTimeout(resolve, SEND_POLL_MS));
       }
       socket.send(value);
-      restartQuiet();
     }
     if (socket.readyState === WebSocket.OPEN) {
       socket.send(JSON.stringify({ t: "end" }));

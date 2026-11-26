@@ -59,7 +59,7 @@ func TestCreate(t *testing.T) {
 	if _, err := Create(root, "c1"); err == nil {
 		t.Error("the same id was created twice")
 	}
-	for _, id := range []string{"", ".", "..", "a/b", "../x"} {
+	for _, id := range []string{"", ".", "..", "a/b", "../x", ".networks"} {
 		if _, err := Create(root, id); err == nil {
 			t.Errorf("id %q was accepted", id)
 		}
