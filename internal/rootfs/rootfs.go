@@ -56,6 +56,9 @@ const (
 	codeIsDir    = "EISDIR"
 	codeInvalid  = "EINVAL"
 	codeIO       = "EIO"
+	codeReadOnly = "EROFS"
+	codeExists   = "EEXIST"
+	codeNotEmpty = "ENOTEMPTY"
 )
 
 // maxRead is the most bytes one read returns. The guest's 9p client
@@ -118,10 +121,17 @@ type failure struct {
 // Handler answers the page's requests from a Tree.
 type Handler struct {
 	Tree Tree
+	// Writable lets the page change the tree (write.go). An image's tree
+	// is never writable; a volume's is unless it was mounted read-only.
+	Writable bool
 }
 
 // Serve answers one operation, named by op.
 func (h Handler) Serve(w http.ResponseWriter, r *http.Request, op string) {
+	if h.change(w, r, op) {
+		return
+	}
+
 	query := r.URL.Query()
 	path := query.Get(paramPath)
 
@@ -202,6 +212,10 @@ func failWith(w http.ResponseWriter, err error) {
 		fail(w, http.StatusNotFound, codeNotFound)
 	case errors.Is(err, fs.ErrPermission):
 		fail(w, http.StatusForbidden, codeAccess)
+	case errors.Is(err, fs.ErrExist):
+		fail(w, http.StatusConflict, codeExists)
+	case errors.Is(err, syscall.ENOTEMPTY):
+		fail(w, http.StatusConflict, codeNotEmpty)
 	case errors.Is(err, syscall.ENOTDIR):
 		fail(w, http.StatusBadRequest, codeNotDir)
 	case errors.Is(err, syscall.EISDIR):
