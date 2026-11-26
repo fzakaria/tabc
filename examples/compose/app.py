@@ -25,6 +25,12 @@ def visits():
 
 class Handler(http.server.BaseHTTPRequestHandler):
     def do_GET(self):
+        # Only the page itself is a visit. A browser also asks for an
+        # icon, which would otherwise count every visit twice.
+        if self.path != "/":
+            self.send_error(404)
+            return
+
         body = f"Hello from a browser tab. I have been seen {visits()} times.\n".encode()
         self.send_response(200)
         self.send_header("Content-Type", "text/plain")
