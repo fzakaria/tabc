@@ -10,6 +10,8 @@
   pkgs,
   share ? import ./share.nix { inherit pkgs; },
   chromium ? if pkgs.stdenv.hostPlatform.isLinux then pkgs.chromium else null,
+  # The docker command line tocker becomes, Compose included.
+  docker ? pkgs.docker-client,
   target ? null,
 }:
 let
@@ -39,7 +41,14 @@ let
       "-w"
       "-X main.version=${go.version}"
     ]
-    ++ lib.optional (pinned != null) "-X main.chromiumBuilt=${pinned}/bin/chromium";
+    ++ lib.optional (pinned != null) "-X main.chromiumBuilt=${pinned}/bin/chromium"
+    ++ lib.optional (target == null) "-X main.dockerBuilt=${docker}/bin/docker";
+
+    # tocker is tabc under another name: the docker command line,
+    # pointed at tabc's own daemon.
+    postInstall = ''
+      ln -s tabc $out/bin/tocker
+    '';
 
     # Every package's tests, not only the command's.
     checkPhase = ''
@@ -79,4 +88,5 @@ else
   # Go installs a cross-compiled binary under bin/<os>_<arch>/.
   pkgs.runCommand "tabc-${target.os}-${target.arch}-${go.version}" { } ''
     install -Dm755 "$(find ${cross}/bin -type f -name tabc)" $out/bin/tabc
+    ln -s tabc $out/bin/tocker
   ''

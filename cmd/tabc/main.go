@@ -12,6 +12,11 @@
 //
 //	tabc run [-it] <image> [program and arguments]
 //
+// or stands in for the engine, so the Docker command line and Compose
+// work where there is no Docker (daemon.go, tocker.go):
+//
+//	tocker compose up
+//
 // create starts a supervisor (internal/supervisor), which starts
 // headless Chromium on a page that boots a Linux guest with the
 // container's image as its root. start runs the container's program in
@@ -56,6 +61,21 @@ const exitError = 1
 const logFormatJSON = "json"
 
 func main() {
+	// Run under tocker's name, or as `tabc tocker`, the words that
+	// follow are a docker command and not an engine's.
+	if isTocker() {
+		fatal(cli.Invocation{}, tocker(os.Args[1:]))
+	}
+	if len(os.Args) > 1 && os.Args[1] == commandTocker {
+		fatal(cli.Invocation{}, tocker(os.Args[2:]))
+	}
+	if len(os.Args) > 1 && os.Args[1] == commandDaemon {
+		if err := daemon(os.Args[2:]); err != nil {
+			fatal(cli.Invocation{}, err)
+		}
+		return
+	}
+
 	inv, err := cli.Parse(os.Args[1:])
 	if err != nil {
 		fatal(inv, err)
@@ -107,6 +127,9 @@ func main() {
 // fatal reports an error where the engine asked for errors, and on
 // stderr, and exits.
 func fatal(inv cli.Invocation, err error) {
+	if err == nil {
+		os.Exit(0)
+	}
 	if inv.Log != "" {
 		writeLog(inv.Log, inv.LogFormat, err)
 	}
