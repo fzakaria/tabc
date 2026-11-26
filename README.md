@@ -7,7 +7,7 @@ a Linux process, tabc starts headless Chromium and boots the container
 inside a tab, on a Linux kernel compiled to WebAssembly. The tab is the
 sandbox.
 
-<p align="center"><img src="docs/img/demo.webp" width="720" alt="docker run with the tabc runtime on Linux, then tabc run on a Mac with no VM running"></p>
+<p align="center"><a href="docs/img/demo.webp"><img src="docs/img/demo.webp" width="560" alt="docker run with the tabc runtime on Linux, then tabc run on a Mac with no VM running"></a></p>
 
 ```console
 $ docker run --rm --runtime tabc --platform linux/arm64 alpine uname -sm
@@ -22,7 +22,7 @@ type into from either side:
 $ tabc run -it --open -p 8123:80 nginx:alpine sh
 ```
 
-<p align="center"><img src="docs/img/tab.webp" width="640" alt="A terminal above a Chromium window. A tab opens, boots Linux and shows a shell; commands typed in the tab and in the terminal appear in both. nginx starts in the container and a second tab loads its page from localhost:8123."></p>
+<p align="center"><a href="docs/img/tab.webp"><img src="docs/img/tab.webp" width="480" alt="A terminal above a Chromium window. A tab opens, boots Linux and shows a shell; commands typed in the tab and in the terminal appear in both. nginx starts in the container and a second tab loads its page from localhost:8123."></a></p>
 
 Compose works too, with every service in a tab of its own:
 
@@ -30,7 +30,7 @@ Compose works too, with every service in a tab of its own:
 $ tocker compose up
 ```
 
-<p align="center"><img src="docs/img/compose.webp" width="640" alt="A terminal runs tocker compose up; a Chromium window under it shows a pane per service, Redis starting in one and a web server in the other. A second tab loads the web service and its count goes up."></p>
+<p align="center"><a href="docs/img/compose.webp"><img src="docs/img/compose.webp" width="480" alt="A terminal runs tocker compose up; a Chromium window under it shows a pane per service, Redis starting in one and a web server in the other. A second tab loads the web service and its count goes up."></a></p>
 
 A container starts in under a second: 0.87 s on a Ryzen laptop, 0.44 s
 on an M4.
