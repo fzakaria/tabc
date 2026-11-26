@@ -46,6 +46,10 @@
             };
           };
 
+          # what a release uploads for someone without Nix: an archive
+          # of tabc for each system, Linux and Mac, x86-64 and arm64
+          release = import ./nix/release.nix { inherit pkgs share; };
+
           # a bundle to run by hand, and the one the end-to-end check
           # runs: `nix run . -- run --bundle "$(nix build .#example --print-out-paths)" demo`
           example = import ./nix/example.nix { inherit pkgs guestPkgs; };
@@ -74,6 +78,10 @@
         # the runtime end to end, in a real headless Chromium, where
         # nixpkgs has one to run
         // nixpkgs.lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux {
+          # every system's binary still builds, which nothing else
+          # here would notice until a release
+          inherit (packages) release;
+
           e2e = import ./nix/e2e.nix {
             inherit pkgs;
             inherit (packages) tabc;
