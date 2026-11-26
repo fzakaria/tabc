@@ -93,3 +93,26 @@ func TestParseVersion(t *testing.T) {
 		t.Errorf("got %+v", inv)
 	}
 }
+
+// TestParseRun checks that `run` leaves a program's flags alone: -v
+// before a command asks for the version, and after `run` is the run's
+// own; and a flag after the image is the program's, whatever tabc
+// would have made of it.
+func TestParseRun(t *testing.T) {
+	inv, err := Parse([]string{"run", "-v", "/host:/data", "alpine", "grep", "-b", "--force", "x"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if inv.Version || inv.Bundle != "" || inv.Force {
+		t.Errorf("a program's flags were read as tabc's: %+v", inv)
+	}
+	if inv.Command != "run" {
+		t.Errorf("command %q", inv.Command)
+	}
+
+	// With a bundle, the flags before the id are still tabc's.
+	inv, err = Parse([]string{"run", "--bundle", "/b", "id1"})
+	if err != nil || inv.Bundle != "/b" || !reflect.DeepEqual(inv.Args, []string{"id1"}) {
+		t.Errorf("bundle run: %+v, %v", inv, err)
+	}
+}

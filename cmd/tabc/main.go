@@ -49,7 +49,6 @@ const (
 	commandState    = "state"
 	commandKill     = "kill"
 	commandDelete   = "delete"
-	commandRun      = "run"
 	commandFeatures = "features"
 )
 
@@ -99,14 +98,14 @@ func main() {
 		err = remove(inv)
 	case commandFeatures:
 		err = printFeatures()
-	case commandRun:
+	case cli.CommandRun:
 		// With a bundle, run is the lifecycle in one command. Without
 		// one, the words after run name an image and a program.
 		var status int
 		if inv.Bundle != "" {
 			status, err = runBundle(inv)
 		} else {
-			status, err = runImage(argumentsAfter(os.Args[1:], commandRun))
+			status, err = runImage(argumentsAfter(os.Args[1:], cli.CommandRun))
 		}
 		if err == nil {
 			os.Exit(status)

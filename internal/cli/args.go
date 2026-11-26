@@ -32,6 +32,9 @@ const (
 	FlagMirrorPorts = "mirror-ports"
 )
 
+// CommandRun is the command whose later words are a program's.
+const CommandRun = "run"
+
 // valueFlags are the flags that take a value, the ones tabc reads and
 // the ones engines pass that tabc has no use for. Every other flag is a
 // switch. Knowing which is which is what lets an unknown switch be
@@ -102,6 +105,13 @@ func Parse(args []string) (Invocation, error) {
 			continue
 		}
 
+		// After `run` and its first word, an image or an id, the rest is
+		// a program and its arguments, whose flags are the program's.
+		if inv.Command == CommandRun && len(inv.Args) > 0 {
+			inv.Args = append(inv.Args, arg)
+			continue
+		}
+
 		// A flag is "--name", "-n", "--name=value" or "--name value".
 		name, value, inline := strings.Cut(strings.TrimLeft(arg, "-"), "=")
 		if valueFlags[name] && !inline {
@@ -130,7 +140,10 @@ func Parse(args []string) (Invocation, error) {
 		case flagAll, flagAllShort:
 			inv.All = true
 		case flagVersion, flagVersionShort:
-			inv.Version = true
+			// Only before a command: after one, -v is the command's.
+			if inv.Command == "" {
+				inv.Version = true
+			}
 		case FlagMirrorPorts:
 			inv.MirrorPorts = true
 		}
