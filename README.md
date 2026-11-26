@@ -47,8 +47,9 @@ hi
 tabc is one file, and `tocker` is the same file under another name. On
 Linux the Nix package brings its own Chromium. On a Mac tabc looks for
 Chrome in `/Applications`, or set `TABC_CHROMIUM`. With `--open` the
-container runs in the browser you already have, which has to be a
-recent Chrome or Chromium: Firefox cannot boot the kernel.
+container runs in the browser you already have. The browser needs
+WebAssembly JSPI: a recent Chrome or Chromium has it, and so does
+Firefox 160. An older Firefox does not, and the page says so.
 
 ## Use
 

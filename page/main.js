@@ -735,7 +735,7 @@ async function main() {
   if (!support.ok) {
     throw new Error(
       `This browser cannot run the container: ${support.problems.join("; ")}. ` +
-        "A recent Chrome or Chromium can.",
+        "A recent Chrome, Chromium or Firefox can.",
     );
   }
 
