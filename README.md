@@ -72,6 +72,10 @@ hi
 A release's tabc uses the Chrome or Chromium you have installed, and
 `tocker` the `docker` command line you have installed.
 
+The Mac archives are not notarized. Fetched with `curl` as above they
+run; one downloaded in a browser has to be released from quarantine
+first, with `xattr -d com.apple.quarantine tabc`.
+
 tabc is one file, and `tocker` is the same file under another name. On
 Linux the Nix package brings its own Chromium. On a Mac tabc looks for
 Chrome in `/Applications`, or uses the one `TABC_CHROMIUM` points at.
