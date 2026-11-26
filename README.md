@@ -30,7 +30,7 @@ Compose works too, with every service in a tab of its own:
 $ tocker compose up
 ```
 
-<p align="center"><img src="docs/img/compose.webp" width="640" alt="A terminal runs tocker compose up; a Chromium window under it shows a pane per service, Redis starting in one and a web server logging requests in the other."></p>
+<p align="center"><img src="docs/img/compose.webp" width="640" alt="A terminal runs tocker compose up; a Chromium window under it shows a pane per service, Redis starting in one and a web server in the other. A second tab loads the web service and its count goes up."></p>
 
 A container starts in under a second: 0.87 s on a Ryzen laptop, 0.44 s
 on an M4.
@@ -49,7 +49,8 @@ Linux the Nix package brings its own Chromium. On a Mac tabc looks for
 Chrome in `/Applications`, or set `TABC_CHROMIUM`. With `--open` the
 container runs in the browser you already have. The browser needs
 WebAssembly JSPI: a recent Chrome or Chromium has it, and so does
-Firefox 160. An older Firefox does not, and the page says so.
+Firefox 160. In a browser without it, tabc prints what is missing and
+exits.
 
 ## Use
 

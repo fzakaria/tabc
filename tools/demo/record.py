@@ -290,26 +290,35 @@ def scenario_compose():
 
     type_command("tocker --dashboard compose up -d")
     up = Shell([tocker, "--dashboard", "compose", "up", "-d"], ENV)
-    opened()
     up.wait_exit(120)
 
+    dashboard = tab_for(opened())
+
     # The web server takes a few seconds to import its modules under
-    # emulation. The demo asks once it answers, as a person would after
-    # seeing its "listening" line in the pane.
+    # emulation. The demo asks once the server answers. The probe is
+    # for a path the server does not count as a visit.
     deadline = time.time() + 60
     while time.time() < deadline:
         probe = subprocess.run(["curl", "-s", "-m", "2", "-o", "/dev/null", "-w", "%{http_code}",
-                                "http://127.0.0.1:8123/"], capture_output=True, text=True)
+                                "http://127.0.0.1:8123/ready"], capture_output=True, text=True)
         if probe.stdout.strip() not in ("", "000"):
             break
         time.sleep(0.3)
-    time.sleep(1.0)
-
-    for _ in range(3):
-        type_command("curl localhost:8123")
-        Shell(["curl", "-s", "-m", "10", "http://127.0.0.1:8123/"], ENV).wait_exit()
-        time.sleep(1.3)
     time.sleep(1.5)
+
+    # The service is visited from the same browser, in a tab beside the
+    # one the containers are running in, and then from the terminal.
+    visitor = Page(new_tab("http://localhost:8123/"))
+    time.sleep(2.5)
+    for _ in range(2):
+        visitor.send("Page.reload")
+        time.sleep(1.8)
+    activate(dashboard)
+    time.sleep(3.0)
+
+    type_command("curl localhost:8123")
+    Shell(["curl", "-s", "-m", "10", "http://127.0.0.1:8123/"], ENV).wait_exit()
+    time.sleep(3.0)
 
     type_command("tocker compose down")
     Shell([tocker, "compose", "down", "-t", "2"], ENV).wait_exit(120)
