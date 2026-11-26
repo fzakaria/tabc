@@ -54,6 +54,12 @@ type Overrides struct {
 	// Command replaces the image's default arguments when not empty.
 	// The image's entry point stays, as with every engine.
 	Command []string
+	// Entrypoint replaces the image's entry point when ReplaceEntrypoint
+	// is set, an empty one included: that is how an entry point is
+	// removed. Replacing it drops the image's default arguments too, as
+	// with every engine.
+	Entrypoint        []string
+	ReplaceEntrypoint bool
 	// Env is added to the image's environment, and wins.
 	Env []string
 	// Cwd and User replace the image's when not empty.
@@ -67,11 +73,14 @@ type Overrides struct {
 func Spec(config v1.Config, overrides Overrides, tree rootfs.Tree) (guest.Spec, error) {
 	// The program: the entry point, then the command or the image's
 	// default arguments.
-	arguments := config.Cmd
+	entrypoint, arguments := config.Entrypoint, config.Cmd
+	if overrides.ReplaceEntrypoint {
+		entrypoint, arguments = overrides.Entrypoint, nil
+	}
 	if len(overrides.Command) > 0 {
 		arguments = overrides.Command
 	}
-	args := append(append([]string{}, config.Entrypoint...), arguments...)
+	args := append(append([]string{}, entrypoint...), arguments...)
 	if len(args) == 0 {
 		return guest.Spec{}, errors.New("the image names no program to run, and none was given")
 	}

@@ -78,6 +78,17 @@ func TestSpecOverrides(t *testing.T) {
 		t.Errorf("environment %v in %q", spec.Env, spec.Cwd)
 	}
 
+	// A replaced entry point takes the image's default arguments with
+	// it, and an empty one leaves the command alone.
+	spec, err = Spec(config, Overrides{Entrypoint: []string{"/other"}, ReplaceEntrypoint: true}, fakeTree{})
+	if err != nil || !reflect.DeepEqual(spec.Args, []string{"/other"}) {
+		t.Errorf("a replaced entry point: %v, %v", spec.Args, err)
+	}
+	spec, err = Spec(config, Overrides{ReplaceEntrypoint: true, Command: []string{"sh"}}, fakeTree{})
+	if err != nil || !reflect.DeepEqual(spec.Args, []string{"sh"}) {
+		t.Errorf("a removed entry point: %v, %v", spec.Args, err)
+	}
+
 	if _, err := Spec(v1.Config{}, Overrides{}, fakeTree{}); err == nil {
 		t.Error("an image with no program and no command made a spec")
 	}

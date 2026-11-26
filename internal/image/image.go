@@ -45,7 +45,14 @@ const (
 // Image is a pulled image: where its layers are, lowest first, and the
 // configuration its author gave it.
 type Image struct {
+	// Reference is the image's full name, registry and tag included.
+	Reference string
+	// ID is the hash of the image's configuration, which is what
+	// engines call an image's id.
+	ID string
+	// Layers are the layers' files, lowest first.
 	Layers []string
+	// Config is the configuration the image's author gave it.
 	Config v1.Config
 }
 
@@ -93,6 +100,32 @@ func Get(ctx context.Context, reference, cacheDir string, refresh Refresh, progr
 	}
 	saveRecord(record, image)
 	return image, nil
+}
+
+// Lookup returns the image a reference names if the cache has it,
+// without asking any registry.
+func Lookup(reference, cacheDir string) (*Image, bool) {
+	parsed, err := name.ParseReference(reference)
+	if err != nil {
+		return nil, false
+	}
+	return loadRecord(filepath.Join(cacheDir, imagesDir, recordName(parsed.Name())))
+}
+
+// List returns every image the cache has.
+func List(cacheDir string) []*Image {
+	listed, err := os.ReadDir(filepath.Join(cacheDir, imagesDir))
+	if err != nil {
+		return nil
+	}
+
+	var images []*Image
+	for _, item := range listed {
+		if image, ok := loadRecord(filepath.Join(cacheDir, imagesDir, item.Name())); ok && image.Reference != "" {
+			images = append(images, image)
+		}
+	}
+	return images
 }
 
 // recordName is the file an image's record is kept in: the hash of the
@@ -168,7 +201,10 @@ func pull(ctx context.Context, parsed name.Reference, cacheDir string, progress 
 		return nil, err
 	}
 
-	image := &Image{Config: config.Config}
+	image := &Image{Reference: parsed.Name(), Config: config.Config}
+	if id, err := remoteImage.ConfigName(); err == nil {
+		image.ID = id.String()
+	}
 	for _, layer := range layers {
 		path, err := fetchLayer(layer, directory, progress)
 		if err != nil {
