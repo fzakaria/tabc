@@ -26,6 +26,7 @@ import (
 	"time"
 
 	"github.com/fzakaria/tabc/internal/console"
+	"github.com/fzakaria/tabc/internal/guest"
 	"github.com/fzakaria/tabc/internal/netreg"
 	"github.com/fzakaria/tabc/internal/plan"
 	"github.com/fzakaria/tabc/internal/rootfs"
@@ -81,6 +82,10 @@ const (
 	defaultCols  = 80
 	defaultRows  = 24
 )
+
+// volumeMountPattern is where in the guest the page mounts a volume, by
+// the volume's number.
+const volumeMountPattern = "/tabc/vol/%d"
 
 // resizePoll is how often the supervisor looks whether the engine
 // changed the terminal's size. A size set on the controlling end raises
@@ -196,6 +201,29 @@ func run(options Options, dir string, logger *log.Logger, logFile *os.File) (int
 	if err != nil {
 		return 0, err
 	}
+
+	// The volumes: each a directory of the host the page mounts in the
+	// guest under a number, and init binds to its place in the
+	// container.
+	guestSpec := planned.Spec
+	var volumes []fileServer
+	var mounted []pageVolume
+	for index, volume := range planned.Volumes {
+		directory, err := rootfs.OpenDir(volume.Source)
+		if err != nil {
+			return 0, fmt.Errorf("volume %s: %w", volume.Source, err)
+		}
+		defer directory.Close()
+
+		inGuest := fmt.Sprintf(volumeMountPattern, index)
+		volumes = append(volumes, rootfs.Handler{Tree: directory, Writable: !volume.ReadOnly})
+		mounted = append(mounted, pageVolume{Path: inGuest, ReadOnly: volume.ReadOnly})
+		guestSpec.Volumes = append(guestSpec.Volumes, guest.Volume{
+			Source:   inGuest,
+			Target:   volume.Target,
+			ReadOnly: volume.ReadOnly,
+		})
+	}
 	conversation := newSession(stdout, stderr, logger.Printf)
 
 	// Connections into the container: every port the program opens,
@@ -225,8 +253,10 @@ func run(options Options, dir string, logger *log.Logger, logFile *os.File) (int
 			MemoryMiB:   memoryMiB(planned.MemoryBytes),
 			Network:     true,
 			MirrorPorts: options.MirrorPorts,
+			Volumes:     mounted,
 		},
-		spec:     planned.Spec,
+		spec:     guestSpec,
+		volumes:  volumes,
 		files:    rootfs.Handler{Tree: tree},
 		session:  conversation,
 		inbound:  incoming,

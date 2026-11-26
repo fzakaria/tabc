@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"path"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/fzakaria/tabc/internal/assets"
@@ -34,6 +35,7 @@ const (
 	routeNet      = "net"
 	routeInbound  = "in"
 	routeRelay    = "relay"
+	routeVolume   = "vol"
 	routeUnkernel = "unkernel"
 	routeXterm    = "xterm"
 	netLookup     = "dns"
@@ -55,6 +57,15 @@ type pageConfig struct {
 	Network   bool   `json:"network"`
 	// MirrorPorts has the page watch which ports the program opens.
 	MirrorPorts bool `json:"mirrorPorts"`
+	// Volumes are where in the guest the page mounts each volume, and
+	// whether read-only.
+	Volumes []pageVolume `json:"volumes"`
+}
+
+// pageVolume is one volume as the page mounts it.
+type pageVolume struct {
+	Path     string `json:"path"`
+	ReadOnly bool   `json:"readOnly"`
 }
 
 // fileServer answers the page's requests for the container's files
@@ -75,6 +86,10 @@ type server struct {
 	session  *session
 	inbound  *inbound
 	resolver *net.Resolver
+
+	// volumes are the directories of the host the container mounts, in
+	// the plan's order, which is how the page names them.
+	volumes []fileServer
 
 	// root and networks are where and on which tabc networks the
 	// container's neighbours are looked for (internal/netreg).
@@ -130,6 +145,15 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		s.inbound.serve(w, r)
 	case routeRelay:
 		s.inbound.serveRelay(w, r)
+	case routeVolume:
+		// vol/<number>/<operation>.
+		number, op, _ := strings.Cut(remainder, "/")
+		index, err := strconv.Atoi(number)
+		if err != nil || index < 0 || index >= len(s.volumes) {
+			http.NotFound(w, r)
+			return
+		}
+		s.volumes[index].Serve(w, r, op)
 	case routeUnkernel:
 		s.serveShared(w, r, assets.Unkernel, remainder)
 	case routeXterm:

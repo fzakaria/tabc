@@ -85,6 +85,12 @@ func TestGuestSpec(t *testing.T) {
 		t.Error("a bound directory was copied as a file")
 	}
 
+	// A bound directory is a volume, carried live.
+	volumes := b.Volumes()
+	if len(volumes) != 1 || volumes[0].Source != sources || volumes[0].Target != "/data" || volumes[0].ReadOnly {
+		t.Errorf("volumes %+v", volumes)
+	}
+
 	// The engine's resolver file is named, not copied: the engine may
 	// write it after the container is created.
 	if got := b.ResolvConfPath(); got != resolv {

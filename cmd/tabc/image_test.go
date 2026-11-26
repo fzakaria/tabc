@@ -1,6 +1,8 @@
 package main
 
 import (
+	"os"
+	"path/filepath"
 	"reflect"
 	"testing"
 
@@ -79,6 +81,32 @@ func TestParsePublish(t *testing.T) {
 	for _, text := range []string{"", "web", "0:80", "1:2:3:4", "80:99999"} {
 		if _, err := parsePublish(text); err == nil {
 			t.Errorf("parsePublish(%q) succeeded", text)
+		}
+	}
+}
+
+// TestParseVolume checks a mount's two forms against a real directory,
+// and that a missing directory, a file, and a target that is not a path
+// are refused.
+func TestParseVolume(t *testing.T) {
+	dir := t.TempDir()
+
+	volume, err := parseVolume(dir + ":/data")
+	if err != nil || volume.Source != dir || volume.Target != "/data" || volume.ReadOnly {
+		t.Errorf("read-write: %+v, %v", volume, err)
+	}
+	volume, err = parseVolume(dir + ":/data/:ro")
+	if err != nil || volume.Target != "/data" || !volume.ReadOnly {
+		t.Errorf("read-only: %+v, %v", volume, err)
+	}
+
+	file := filepath.Join(dir, "file")
+	if err := os.WriteFile(file, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for _, text := range []string{dir, dir + ":data", dir + "/missing:/data", file + ":/data", ":/data"} {
+		if _, err := parseVolume(text); err == nil {
+			t.Errorf("parseVolume(%q) succeeded", text)
 		}
 	}
 }

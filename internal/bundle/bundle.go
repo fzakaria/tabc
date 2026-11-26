@@ -34,6 +34,8 @@ const (
 	mountTypeBind = "bind"
 	optionBind    = "bind"
 	optionRbind   = "rbind"
+	// optionReadOnly marks a mount the container may not change.
+	optionReadOnly = "ro"
 )
 
 // maxBoundFile is the largest file a bind mount may name for tabc to
@@ -264,7 +266,37 @@ func (b *Bundle) Plan() plan.Plan {
 		Cols:           int(cols),
 		Rows:           int(rows),
 		MemoryBytes:    b.MemoryLimit(),
+		Volumes:        b.Volumes(),
 		Rootfs:         b.Rootfs,
 		ResolvConfPath: b.ResolvConfPath(),
 	}
+}
+
+// Volumes returns the directories the configuration binds into the
+// container: an engine's volumes and bind mounts, each a directory on
+// the host. Single files are copied by content instead (boundFiles).
+func (b *Bundle) Volumes() []plan.Volume {
+	var volumes []plan.Volume
+	for _, mount := range b.Spec.Mounts {
+		if !isBind(mount) {
+			continue
+		}
+		info, err := os.Stat(mount.Source)
+		if err != nil || !info.IsDir() {
+			continue
+		}
+
+		readOnly := false
+		for _, option := range mount.Options {
+			if option == optionReadOnly {
+				readOnly = true
+			}
+		}
+		volumes = append(volumes, plan.Volume{
+			Source:   mount.Source,
+			Target:   filepath.Clean(mount.Destination),
+			ReadOnly: readOnly,
+		})
+	}
+	return volumes
 }

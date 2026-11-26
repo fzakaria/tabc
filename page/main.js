@@ -19,6 +19,7 @@ const CONTROL_URL = "ctl";
 const NET_DNS_URL = "net/dns";
 const NET_TCP_URL = "net/tcp";
 const INBOUND_URL = "in";
+const VOLUME_URL = "vol/";
 
 // Where the guest finds the image, and init with the container's spec.
 const LOWER_DIR = "/tabc/lower";
@@ -268,6 +269,60 @@ function imageFs() {
         getattr: () => attr,
       };
     },
+  };
+}
+
+// A volume as a file system of the guest: a directory of the host that
+// the container reads and writes. Unlike the image it changes, under
+// the container's hands and under the host's, so nothing here is kept:
+// every question goes to the supervisor, and every change too.
+function volumeFs(index) {
+  const base = `${VOLUME_URL}${index}/`;
+  const request = async (op, params, init) => {
+    const response = await fetch(`${base}${op}?${new URLSearchParams(params)}`, init);
+    if (response.ok) {
+      return response;
+    }
+    const { code } = await response.json();
+    throw new FsError(code);
+  };
+  const ask = (op, path, extra = {}) => request(op, { p: path, ...extra });
+  const change = (op, path, extra = {}, body = undefined) =>
+    request(op, { p: path, ...extra }, { method: "POST", body });
+  const attrOf = async (path) => (await ask("attr", path)).json();
+  const octal = (mode) => mode.toString(8);
+
+  // An open file, by path: reads and writes each name their range.
+  const fileAt = (path) => ({
+    read: async (offset, length) =>
+      new Uint8Array(await (await ask("read", path, { o: offset, n: length })).arrayBuffer()),
+    write: async (offset, data) =>
+      (await (await change("write", path, { o: offset }, data)).json()).written,
+    getattr: () => attrOf(path),
+    setattr: (attr) => change("setattr", path, {}, JSON.stringify(attr)),
+  });
+
+  return {
+    getattr: attrOf,
+    readdir: async (path) =>
+      (await (await ask("dir", path)).json()).map(({ name, type, ino }) => ({ name, type, ino })),
+    readlink: async (path) => (await (await ask("link", path)).json()).target,
+    open: async (path, flags) => {
+      await attrOf(path);
+      if (flags.truncate) {
+        await change("setattr", path, {}, JSON.stringify({ size: 0 }));
+      }
+      return fileAt(path);
+    },
+    create: async (path, mode) => {
+      await change("create", path, { m: octal(mode) });
+      return fileAt(path);
+    },
+    mkdir: (path, mode) => change("mkdir", path, { m: octal(mode) }),
+    symlink: (path, target) => change("symlink", path, { t: target }),
+    remove: (path, dir) => change("remove", path, { d: dir ? 1 : 0 }),
+    rename: (from, to) => change("rename", from, { t: to }),
+    setattr: (path, attr) => change("setattr", path, {}, JSON.stringify(attr)),
   };
 }
 
@@ -677,6 +732,13 @@ async function main() {
     mounts: {
       [BIN_DIR]: { fs: bin, readOnly: true },
       [LOWER_DIR]: { fs: imageFs(), readOnly: true, requestTimeout: NO_TIMEOUT },
+      // Each volume where init expects to find it.
+      ...Object.fromEntries(
+        config.volumes.map((volume, index) => [
+          volume.path,
+          { fs: volumeFs(index), readOnly: volume.readOnly, requestTimeout: NO_TIMEOUT },
+        ]),
+      ),
     },
     log: (message) => tell(ToSupervisor.LOG, { message }),
   });

@@ -29,4 +29,19 @@ type Spec struct {
 	// starts, path to content: the files a container engine binds over
 	// the image, such as /etc/hosts.
 	Files map[string]string `json:"files,omitempty"`
+
+	// Volumes are directories from outside the image, each already
+	// mounted somewhere in the guest by the page and bound from there to
+	// where the container expects it.
+	Volumes []Volume `json:"volumes,omitempty"`
+}
+
+// Volume is one directory to bind into the container's root.
+type Volume struct {
+	// Source is where the page mounted the directory in the guest, and
+	// Target the path in the container.
+	Source string `json:"source"`
+	Target string `json:"target"`
+	// ReadOnly keeps the container from changing the directory.
+	ReadOnly bool `json:"readOnly,omitempty"`
 }

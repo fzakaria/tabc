@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -58,6 +59,7 @@ type imageRun struct {
 	user        string
 	memory      int64
 	publish     []plan.Publish
+	volumes     []plan.Volume
 	name        string
 	networks    []string
 	image       string
@@ -135,6 +137,14 @@ func parseImageRun(args []string) (imageRun, error) {
 				published, err = parsePublish(text)
 				parsed.publish = append(parsed.publish, published)
 			}
+		case "-v", "--volume":
+			var text string
+			text, err = value(name, inline, hasInline)
+			if err == nil {
+				var volume plan.Volume
+				volume, err = parseVolume(text)
+				parsed.volumes = append(parsed.volumes, volume)
+			}
 		case "-m", "--memory":
 			var text string
 			text, err = value(name, inline, hasInline)
@@ -148,7 +158,7 @@ func parseImageRun(args []string) (imageRun, error) {
 			return parsed, err
 		}
 	}
-	return parsed, errors.New("usage: tabc run [-it] [--open | --link] [--pull] [--name name] [--network network] [-p [address:]host:container] [-e NAME=value] [-w dir] [-u user] [-m memory] <image> [program...]")
+	return parsed, errors.New("usage: tabc run [-it] [--open | --link] [--pull] [--name name] [--network network] [-p [address:]host:container] [-v directory:/path[:ro]] [-e NAME=value] [-w dir] [-u user] [-m memory] <image> [program...]")
 }
 
 // parsePublish reads a published port as `docker run -p` writes one:
@@ -179,6 +189,33 @@ func parsePublish(text string) (plan.Publish, error) {
 	published.HostPort = numbers[0]
 	published.GuestPort = numbers[len(numbers)-1]
 	return published, nil
+}
+
+// parseVolume reads a mount as `docker run -v` writes one:
+// "directory:path" or "directory:path:ro". The directory is the
+// host's, and is made absolute, since the supervisor does not stand
+// where the user does.
+func parseVolume(text string) (plan.Volume, error) {
+	parts := strings.Split(text, ":")
+	if len(parts) < 2 || len(parts) > 3 || parts[0] == "" || !strings.HasPrefix(parts[1], "/") {
+		return plan.Volume{}, fmt.Errorf("volume %q is not directory:/path[:ro]", text)
+	}
+	source, err := filepath.Abs(parts[0])
+	if err != nil {
+		return plan.Volume{}, err
+	}
+	info, err := os.Stat(source)
+	if err != nil {
+		return plan.Volume{}, fmt.Errorf("volume %s: %w", parts[0], err)
+	}
+	if !info.IsDir() {
+		return plan.Volume{}, fmt.Errorf("volume %s is not a directory", parts[0])
+	}
+	return plan.Volume{
+		Source:   source,
+		Target:   filepath.Clean(parts[1]),
+		ReadOnly: len(parts) == 3 && parts[2] == "ro",
+	}, nil
 }
 
 // parseMemory reads a memory limit: a number of bytes, or a number with
@@ -245,6 +282,7 @@ func runImage(args []string) (int, error) {
 		MemoryBytes: parsed.memory,
 		Layers:      pulled.Layers,
 		Publish:     parsed.publish,
+		Volumes:     parsed.volumes,
 		Title:       strings.Join(append([]string{parsed.image}, parsed.command...), " "),
 	}
 	if parsed.open {

@@ -108,6 +108,9 @@ func main() {
 	if err := writeFiles(root, spec.Files); err != nil {
 		fail(exitSetupFailed, err)
 	}
+	if err := bindVolumes(root, spec.Volumes); err != nil {
+		fail(exitSetupFailed, err)
+	}
 	if err := enter(root, spec); err != nil {
 		fail(exitSetupFailed, err)
 	}
@@ -215,6 +218,30 @@ func writeFiles(root string, files map[string]string) error {
 		}
 		if err := os.WriteFile(target, []byte(content), fileMode); err != nil {
 			return err
+		}
+	}
+	return nil
+}
+
+// bindVolumes binds each volume, which the page has mounted somewhere in
+// the guest, to its place in the container's root. The place is made if
+// the image has none. A read-only volume is bound and then made
+// read-only, which a bind takes two steps for.
+func bindVolumes(root string, volumes []guest.Volume) error {
+	for _, volume := range volumes {
+		target := filepath.Join(root, volume.Target)
+		if err := os.MkdirAll(target, dirMode); err != nil {
+			return err
+		}
+		if err := syscall.Mount(volume.Source, target, "", syscall.MS_BIND, ""); err != nil {
+			return fmt.Errorf("mounting the volume at %s: %w", volume.Target, err)
+		}
+		if !volume.ReadOnly {
+			continue
+		}
+		flags := uintptr(syscall.MS_BIND | syscall.MS_REMOUNT | syscall.MS_RDONLY)
+		if err := syscall.Mount("", target, "", flags, ""); err != nil {
+			return fmt.Errorf("making the volume at %s read-only: %w", volume.Target, err)
 		}
 	}
 	return nil
