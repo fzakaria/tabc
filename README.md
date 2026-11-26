@@ -7,7 +7,7 @@ a Linux process, tabc starts headless Chromium and boots the container
 inside a tab, on a Linux kernel compiled to WebAssembly. The tab is the
 sandbox.
 
-![docker run with the tabc runtime on Linux, then tabc run on a Mac with no VM running](docs/img/demo.webp)
+<p align="center"><img src="docs/img/demo.webp" width="720" alt="docker run with the tabc runtime on Linux, then tabc run on a Mac with no VM running"></p>
 
 ```console
 $ docker run --rm --runtime tabc --platform linux/arm64 alpine uname -sm
@@ -22,7 +22,7 @@ type into from either side:
 $ tabc run -it --open -p 8123:80 nginx:alpine sh
 ```
 
-![A terminal above a Chromium window. A tab opens, boots Linux and shows a shell; commands typed in the tab and in the terminal appear in both. nginx starts in the container and a second tab loads its page from localhost:8123.](docs/img/tab.webp)
+<p align="center"><img src="docs/img/tab.webp" width="640" alt="A terminal above a Chromium window. A tab opens, boots Linux and shows a shell; commands typed in the tab and in the terminal appear in both. nginx starts in the container and a second tab loads its page from localhost:8123."></p>
 
 Compose works too, with every service in a tab of its own:
 
@@ -30,7 +30,7 @@ Compose works too, with every service in a tab of its own:
 $ tocker compose up
 ```
 
-![A terminal runs tocker compose up; a Chromium window under it shows a pane per service, Redis starting in one and a web server logging requests in the other.](docs/img/compose.webp)
+<p align="center"><img src="docs/img/compose.webp" width="640" alt="A terminal runs tocker compose up; a Chromium window under it shows a pane per service, Redis starting in one and a web server logging requests in the other."></p>
 
 A container starts in under a second: 0.87 s on a Ryzen laptop, 0.44 s
 on an M4.
