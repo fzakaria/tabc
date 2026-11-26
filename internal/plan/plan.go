@@ -40,6 +40,9 @@ const (
 	// BrowserOpen: the user's own browser, which the supervisor asks
 	// the desktop to open on the page.
 	BrowserOpen Browser = "open"
+	// BrowserLink: the user's own browser, when the user opens the
+	// address the supervisor prints.
+	BrowserLink Browser = "link"
 	// BrowserExternal: whoever made the container loads the page
 	// themselves, from the address in the container's record.
 	BrowserExternal Browser = "external"
@@ -86,6 +89,10 @@ type Plan struct {
 	// containers no engine gave a network (internal/netreg).
 	Networks []Network `json:"networks,omitempty"`
 
+	// Volumes are directories of the host carried into the container,
+	// live and writable unless read-only.
+	Volumes []Volume `json:"volumes,omitempty"`
+
 	// Browser is who loads the container's page, and Title what the
 	// page calls the container.
 	Browser Browser `json:"browser,omitempty"`
@@ -97,6 +104,16 @@ type Plan struct {
 type Network struct {
 	Name  string   `json:"name"`
 	Names []string `json:"names"`
+}
+
+// Volume is one directory of the host mounted in the container.
+type Volume struct {
+	// Source is the directory on the host, and Target the path in the
+	// container.
+	Source string `json:"source"`
+	Target string `json:"target"`
+	// ReadOnly keeps the container from changing the directory.
+	ReadOnly bool `json:"readOnly,omitempty"`
 }
 
 // Publish is one port of the host forwarded to a port of the guest.

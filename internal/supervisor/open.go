@@ -13,9 +13,9 @@ var openers = map[string]string{
 	"linux":  "xdg-open",
 }
 
-// openInBrowser asks the desktop to open an address in the user's
+// OpenInBrowser asks the desktop to open an address in the user's
 // browser.
-func openInBrowser(address string) error {
+func OpenInBrowser(address string) error {
 	opener, known := openers[runtime.GOOS]
 	if !known {
 		return errors.New("no way to open a browser on this system")

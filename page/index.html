@@ -4,10 +4,11 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>tabc</title>
+    <link rel="stylesheet" href="xterm/xterm.css" />
     <style>
       /* One container, as a page someone may be looking at: a bar that
          says what the container is and how it is doing, and under it
-         everything the program has printed. Headless Chromium loads the
+         the terminal its program runs on. Headless Chromium loads the
          same page and nobody sees it. */
       :root {
         --ground: #16181d;
@@ -72,16 +73,13 @@
       #status[data-state="exited"]::before {
         background: var(--muted);
       }
-      #output {
-        flex: 1;
-        margin: 0;
-        padding: 0.6rem 0.75rem;
-        overflow: auto;
-        white-space: pre-wrap;
-        overflow-wrap: anywhere;
+      body.embedded header {
+        display: none;
       }
-      #output .stderr {
-        color: var(--muted);
+      #terminal {
+        flex: 1;
+        min-height: 0;
+        padding: 0.5rem 0 0 0.6rem;
       }
     </style>
   </head>
@@ -90,7 +88,11 @@
       <span id="title">tabc</span>
       <span id="status" data-state="waiting">starting</span>
     </header>
-    <pre id="output"></pre>
+    <div id="terminal"></div>
+    <!-- The terminal and its fit addon each define a global, so they
+         load as plain scripts before the page's own module. -->
+    <script src="xterm/xterm.js"></script>
+    <script src="xterm/addon-fit.js"></script>
     <script type="module" src="main.js"></script>
   </body>
 </html>

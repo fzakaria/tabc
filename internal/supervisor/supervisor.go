@@ -321,11 +321,22 @@ func run(options Options, dir string, logger *log.Logger, logFile *os.File) (int
 			return 0, err
 		}
 		logger.Printf("waiting for a browser at %s", record.URL)
-		if planned.Browser == plan.BrowserOpen {
-			fmt.Fprintf(os.Stderr, "tabc: the container is the page at %s\n", record.URL)
-			if err := openInBrowser(record.URL); err != nil {
-				fmt.Fprintf(os.Stderr, "tabc: could not open a browser (%v); open the page yourself\n", err)
+		// Lines end with a carriage return as well as a newline: with a
+		// terminal the user's own is in raw mode by now, where a newline
+		// alone moves down and leaves the cursor in its column, and the
+		// program's first prompt would start halfway across the screen.
+		switch planned.Browser {
+		case plan.BrowserOpen:
+			// Said as what happened, not as something to do: a person who
+			// opens the address again gets a second page, which can only
+			// say that the first one is the container.
+			if err := OpenInBrowser(record.URL); err != nil {
+				fmt.Fprintf(os.Stderr, "tabc: could not open a browser (%v). Open this page to start the container:\r\n  %s\r\n", err, record.URL)
+			} else {
+				fmt.Fprintf(os.Stderr, "tabc: the container is running in a tab that just opened in your browser\r\n")
 			}
+		case plan.BrowserLink:
+			fmt.Fprintf(os.Stderr, "tabc: open this page to start the container:\r\n  %s\r\n", record.URL)
 		}
 	}
 

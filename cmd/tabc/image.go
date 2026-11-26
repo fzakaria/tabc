@@ -52,6 +52,7 @@ type imageRun struct {
 	terminal    bool
 	pull        bool
 	open        bool
+	link        bool
 	env         []string
 	cwd         string
 	user        string
@@ -105,6 +106,10 @@ func parseImageRun(args []string) (imageRun, error) {
 			// Run the container in the user's own browser, as a tab
 			// they can see.
 			parsed.open = true
+		case "--link":
+			// The same, started by the user opening the address tabc
+			// prints.
+			parsed.link = true
 		case "--pull":
 			// Ask the registry even for an image the cache has.
 			parsed.pull = true
@@ -143,7 +148,7 @@ func parseImageRun(args []string) (imageRun, error) {
 			return parsed, err
 		}
 	}
-	return parsed, errors.New("usage: tabc run [-it] [--open] [--pull] [--name name] [--network network] [-p [address:]host:container] [-e NAME=value] [-w dir] [-u user] [-m memory] <image> [program...]")
+	return parsed, errors.New("usage: tabc run [-it] [--open | --link] [--pull] [--name name] [--network network] [-p [address:]host:container] [-e NAME=value] [-w dir] [-u user] [-m memory] <image> [program...]")
 }
 
 // parsePublish reads a published port as `docker run -p` writes one:
@@ -244,6 +249,9 @@ func runImage(args []string) (int, error) {
 	}
 	if parsed.open {
 		planned.Browser = plan.BrowserOpen
+	}
+	if parsed.link {
+		planned.Browser = plan.BrowserLink
 	}
 
 	// A terminal is the one tabc was started on, raw for as long as the

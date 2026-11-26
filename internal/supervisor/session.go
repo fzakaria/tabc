@@ -29,6 +29,11 @@ const (
 	// toPageConnect asks the page for a connection into the guest
 	// (inbound.go).
 	toPageConnect = "connect"
+	// toPageWelcome tells a page it is the container's page, and
+	// toPageTaken that another page already is: the same address opened
+	// in a second tab.
+	toPageWelcome = "welcome"
+	toPageTaken   = "taken"
 
 	fromPageReady = "ready"
 	fromPageExit  = "exit"
@@ -110,12 +115,17 @@ func (s *session) serve(w http.ResponseWriter, r *http.Request) {
 	s.mu.Lock()
 	if s.socket != nil {
 		s.mu.Unlock()
-		socket.Close(websocket.StatusPolicyViolation, "the page is already connected")
+		taken, _ := json.Marshal(pageMessage{Type: toPageTaken})
+		socket.Write(r.Context(), websocket.MessageText, taken)
+		socket.Close(websocket.StatusNormalClosure, "the container already has a page")
 		return
 	}
 	s.socket = socket
 	s.mu.Unlock()
 	s.logf("page connected")
+	if err := s.send(pageMessage{Type: toPageWelcome}); err != nil {
+		return
+	}
 	defer close(s.gone)
 	defer socket.CloseNow()
 

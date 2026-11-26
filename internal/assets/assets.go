@@ -10,10 +10,12 @@ package assets
 
 import "io/fs"
 
-// The layout: a directory for the page, one for the SDK, and init.
+// The layout: a directory for the page, one for the SDK, one for the
+// page's terminal, and init.
 const (
 	Page     = "page"
 	Unkernel = "unkernel"
+	Xterm    = "xterm"
 	Init     = "init"
 )
 

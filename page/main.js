@@ -50,6 +50,8 @@ const FromSupervisor = Object.freeze({
   KILL: "kill",
   RESIZE: "resize",
   CONNECT: "connect",
+  WELCOME: "welcome",
+  TAKEN: "taken",
 });
 const ToSupervisor = Object.freeze({
   READY: "ready",
@@ -73,16 +75,12 @@ const LOST_STATUS = 255;
 const SEND_HIGH_WATER = 1 << 20;
 const SEND_POLL_MS = 5;
 
-// How near the end of the output a reader has to be for new output to
-// scroll into view.
-const FOLLOW_SLACK_PX = 40;
-
 // What the page shows of the container: its name, how it is doing, and
-// what the program printed. The states are the status dot's colours
-// (index.html).
+// the terminal its program runs on. The states are the status dot's
+// colours (index.html).
 const titleElement = document.getElementById("title");
 const statusElement = document.getElementById("status");
-const outputElement = document.getElementById("output");
+const terminalElement = document.getElementById("terminal");
 const State = Object.freeze({
   WAITING: "waiting",
   RUNNING: "running",
@@ -90,50 +88,78 @@ const State = Object.freeze({
   FAILED: "failed",
 });
 
-// The most characters of output the page keeps on show. A container
-// may print for days; the page is a window on the end of it.
-const OUTPUT_LIMIT = 200000;
+// The terminal's look, matching the page around it, and how much of
+// what scrolled away it keeps.
+const TERMINAL_THEME = { background: "#16181d", foreground: "#d7dae0", cursor: "#d7dae0" };
+const TERMINAL_FONT_SIZE = 13;
+const TERMINAL_SCROLLBACK = 5000;
 
-// Escape sequences a program prints for a terminal, which a page that
-// only shows text leaves out: colours, cursor movement, window titles.
-const ESCAPES = /\x1b\[[0-9;?]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x1b[@-_]/g;
+// The escape sequence that prints what follows in red, and the one that
+// ends it, for what the page itself has to say.
+const RED = "\x1b[31m";
+const PLAIN = "\x1b[0m";
 
 function setStatus(state, text) {
   statusElement.dataset.state = state;
   statusElement.textContent = text;
 }
 
-// One decoder per stream, since a character may arrive split across two
-// chunks.
-const decoders = new Map();
+// The terminal on the page. It shows what the program prints, and for a
+// program that was given a terminal it takes what is typed into the
+// page, so a container opened in a browser is used like one opened in a
+// terminal. Made once the container's configuration is known; what is
+// written before that is kept and written then.
+let terminal = null;
+let fitter = null;
+const early = [];
 
-// Add a chunk of the program's output to the page.
-function show(stream, chunk) {
-  if (!decoders.has(stream)) {
-    decoders.set(stream, new TextDecoder());
-  }
-  const text = decoders.get(stream).decode(chunk, { stream: true }).replace(ESCAPES, "");
-  if (text === "") {
+function show(chunk) {
+  if (terminal === null) {
+    early.push(chunk);
     return;
   }
+  terminal.write(chunk);
+}
 
-  // Follow the output only if the reader is already at its end.
-  const atEnd =
-    outputElement.scrollHeight - outputElement.scrollTop - outputElement.clientHeight <
-    FOLLOW_SLACK_PX;
-  const span = document.createElement("span");
-  if (stream === Stream.STDERR) {
-    span.className = "stderr";
-  }
-  span.textContent = text;
-  outputElement.append(span);
+// Make the terminal for a container. `onType` is given what is typed.
+function openTerminal(config, onType) {
+  terminal = new Terminal({
+    cols: config.cols,
+    rows: config.rows,
+    // A program on pipes ends its lines with a bare newline, which a
+    // terminal takes to mean "down" and not "down and back".
+    convertEol: !config.terminal,
+    disableStdin: !config.terminal,
+    cursorBlink: config.terminal,
+    fontSize: TERMINAL_FONT_SIZE,
+    scrollback: TERMINAL_SCROLLBACK,
+    theme: TERMINAL_THEME,
+  });
+  terminal.open(terminalElement);
 
-  while (outputElement.textContent.length > OUTPUT_LIMIT && outputElement.firstChild !== span) {
-    outputElement.firstChild.remove();
+  // A program on pipes has no size of its own, so its output takes the
+  // size of the page. A program on a terminal was told a size, and the
+  // page keeps to it.
+  if (!config.terminal) {
+    fitter = new FitAddon.FitAddon();
+    terminal.loadAddon(fitter);
+    fitter.fit();
+    addEventListener("resize", () => fitter.fit());
+  } else {
+    const encoder = new TextEncoder();
+    terminal.onData((typed) => onType(encoder.encode(typed)));
+    terminal.focus();
   }
-  if (atEnd) {
-    outputElement.scrollTop = outputElement.scrollHeight;
+
+  for (const chunk of early.splice(0)) {
+    terminal.write(chunk);
   }
+}
+
+// Inside a dashboard's pane the dashboard already says what the
+// container is and how it is doing, so the page's own bar is dropped.
+if (window.top !== window) {
+  document.body.classList.add("embedded");
 }
 
 const control = new WebSocket(new URL(CONTROL_URL, location.href).href.replace(/^http/, "ws"));
@@ -149,7 +175,7 @@ function tell(type, fields = {}) {
 function fatal(error) {
   const message = error?.stack ?? String(error);
   setStatus(State.FAILED, "failed");
-  show(Stream.STDERR, new TextEncoder().encode(`\n${message}\n`));
+  show(`\r\n${RED}${message.replaceAll("\n", "\r\n")}${PLAIN}\r\n`);
   if (control.readyState === WebSocket.OPEN) {
     tell(ToSupervisor.ERROR, { message });
   }
@@ -465,7 +491,7 @@ async function watchPorts(vm) {
 // have room: the program's output stream is only read as fast as the
 // supervisor takes it.
 async function sendOutput(stream, chunk) {
-  show(stream, chunk);
+  show(chunk);
   while (control.bufferedAmount > SEND_HIGH_WATER) {
     await new Promise((resolve) => setTimeout(resolve, SEND_POLL_MS));
   }
@@ -514,7 +540,10 @@ async function runOnTerminal(vm, config, incoming) {
   // the program itself ends.
   incoming.onEof = () => {};
   incoming.onKill = (signal) => pty.kill(signal);
-  incoming.onResize = (cols, rows) => pty.resize(cols, rows);
+  incoming.onResize = (cols, rows) => {
+    pty.resize(cols, rows);
+    terminal.resize(cols, rows);
+  };
 
   await pump(pty.output, Stream.STDOUT);
   return statusOf(await pty.ended);
@@ -551,6 +580,24 @@ async function main() {
     control.onopen = resolve;
     control.onerror = () => reject(new Error("no connection to the supervisor"));
   });
+
+  // The supervisor's first word says whether this page is the
+  // container. The same address opened in a second tab is not: the
+  // first tab is, and a second guest would be a second container that
+  // nothing is connected to.
+  const first = await new Promise((resolve) => {
+    control.onmessage = (event) => resolve(JSON.parse(event.data).t);
+    control.onclose = () => resolve(FromSupervisor.TAKEN);
+  });
+  if (first !== FromSupervisor.WELCOME) {
+    control.onclose = null;
+    setStatus(State.FAILED, "open elsewhere");
+    openTerminal({ terminal: false, cols: 80, rows: 24 }, () => {});
+    show(
+      "This container is already running in another tab.\r\nClose this one; the other tab is the container.\r\n",
+    );
+    return;
+  }
 
   // What the supervisor sends before the program runs is kept, and
   // handed to the program's handlers once there are some.
@@ -612,6 +659,9 @@ async function main() {
   document.title = config.title;
   titleElement.textContent = config.title;
   setStatus(State.WAITING, "booting");
+  // What is typed into the page goes where the supervisor's input
+  // goes, once the program is there to take it.
+  openTerminal(config, (bytes) => incoming.onInput?.(bytes));
 
   // Init and the spec it reads, in a file system of their own.
   const bin = new MemoryFs();

@@ -35,6 +35,7 @@ const (
 	routeInbound  = "in"
 	routeRelay    = "relay"
 	routeUnkernel = "unkernel"
+	routeXterm    = "xterm"
 	netLookup     = "dns"
 	netConnect    = "tcp"
 )
@@ -131,6 +132,8 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		s.inbound.serveRelay(w, r)
 	case routeUnkernel:
 		s.serveShared(w, r, assets.Unkernel, remainder)
+	case routeXterm:
+		s.serveShared(w, r, assets.Xterm, remainder)
 	default:
 		if rest == "" {
 			rest = indexFile
