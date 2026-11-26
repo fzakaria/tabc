@@ -207,7 +207,9 @@ func run(options Options, dir string, logger *log.Logger, logFile *os.File) (int
 	// container.
 	guestSpec := planned.Spec
 	var volumes []fileServer
-	var mounted []pageVolume
+	// Never nil: the page is sent this as JSON, where a nil list is
+	// null and not a list with nothing in it.
+	mounted := []pageVolume{}
 	for index, volume := range planned.Volumes {
 		directory, err := rootfs.OpenDir(volume.Source)
 		if err != nil {

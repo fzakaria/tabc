@@ -734,7 +734,7 @@ async function main() {
       [LOWER_DIR]: { fs: imageFs(), readOnly: true, requestTimeout: NO_TIMEOUT },
       // Each volume where init expects to find it.
       ...Object.fromEntries(
-        config.volumes.map((volume, index) => [
+        (config.volumes ?? []).map((volume, index) => [
           volume.path,
           { fs: volumeFs(index), readOnly: volume.readOnly, requestTimeout: NO_TIMEOUT },
         ]),
