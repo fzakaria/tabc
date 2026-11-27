@@ -173,3 +173,21 @@ func TestParseCPUs(t *testing.T) {
 		}
 	}
 }
+
+// TestParseImageRunMovable checks the flag that lets a container be
+// parked: read when a browser someone brings is to load the page, and
+// refused with tabc's own browser, whose page nothing else can open.
+// Each case parses one command line.
+func TestParseImageRunMovable(t *testing.T) {
+	parsed, err := parseImageRun([]string{"--link", "--movable", "alpine", "true"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !parsed.movable || !parsed.link {
+		t.Errorf("parsed %+v", parsed)
+	}
+
+	if _, err := parseImageRun([]string{"--movable", "alpine", "true"}); err == nil {
+		t.Error("--movable was accepted with no browser to move between")
+	}
+}

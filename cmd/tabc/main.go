@@ -9,6 +9,11 @@
 //	tabc kill <id> <signal>
 //	tabc delete <id>
 //
+// A container in a browser somebody brought can be moved to another
+// tab (park.go):
+//
+//	tabc park <id>
+//
 // and with no engine at all, tabc pulls an image and runs it:
 //
 //	tabc run [-it] <image> [program and arguments]
@@ -53,6 +58,7 @@ const (
 	commandFeatures = "features"
 	commandList     = "list"
 	commandPull     = "pull"
+	commandPark     = "park"
 )
 
 // exitError is tabc's own failure status, apart from a program's.
@@ -117,6 +123,8 @@ func main() {
 		}
 	case commandPull:
 		err = pullImage(argumentsAfter(os.Args[1:], commandPull))
+	case commandPark:
+		err = park(inv, os.Stdout)
 	case commandExec:
 		var status int
 		status, err = execCommand(inv, argumentsAfter(os.Args[1:], commandExec))

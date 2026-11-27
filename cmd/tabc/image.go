@@ -55,6 +55,7 @@ type imageRun struct {
 	pull        bool
 	open        bool
 	link        bool
+	movable     bool
 	env         []string
 	cwd         string
 	user        string
@@ -96,6 +97,12 @@ func parseImageRun(args []string) (imageRun, error) {
 		if !strings.HasPrefix(arg, "-") {
 			parsed.image = arg
 			parsed.command = args[index+1:]
+			// A container moves between browsers that someone brings.
+			// The page of tabc's own browser has no address anyone else
+			// can open.
+			if parsed.movable && !parsed.open && !parsed.link {
+				return parsed, errors.New("--movable needs --open or --link: a container moves between browsers that open its page")
+			}
 			return parsed, nil
 		}
 
@@ -119,6 +126,11 @@ func parseImageRun(args []string) (imageRun, error) {
 			// The same, started by the user opening the address tabc
 			// prints.
 			parsed.link = true
+		case "--movable":
+			// Run the program where the guest can keep it through a
+			// snapshot, so that `tabc park` can move the container to
+			// another tab.
+			parsed.movable = true
 		case "--pull":
 			// Ask the registry even for an image the cache has.
 			parsed.pull = true
@@ -182,7 +194,7 @@ func parseImageRun(args []string) (imageRun, error) {
 			return parsed, err
 		}
 	}
-	return parsed, errors.New("usage: tabc run [-it] [--open | --link] [--pull] [--name name] [--network network] [-p [address:]host:container] [-v directory:/path[:ro]] [-e NAME=value] [-w dir] [-u user] [--entrypoint program] [-m memory] [--cpus count] <image> [program...]")
+	return parsed, errors.New("usage: tabc run [-it] [--open | --link] [--movable] [--pull] [--name name] [--network network] [-p [address:]host:container] [-v directory:/path[:ro]] [-e NAME=value] [-w dir] [-u user] [--entrypoint program] [-m memory] [--cpus count] <image> [program...]")
 }
 
 // parsePull reads the words after `pull`: one image.
@@ -350,6 +362,7 @@ func runImage(args []string) (int, error) {
 		Publish:     parsed.publish,
 		Volumes:     parsed.volumes,
 		Title:       strings.Join(append([]string{parsed.image}, parsed.command...), " "),
+		Movable:     parsed.movable,
 	}
 	if parsed.open {
 		planned.Browser = plan.BrowserOpen
