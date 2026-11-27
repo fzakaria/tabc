@@ -2,6 +2,7 @@ package supervisor
 
 import (
 	"bytes"
+	"compress/gzip"
 	"context"
 	"encoding/json"
 	"io"
@@ -56,6 +57,25 @@ func (c *parkedContainer) openPage(t *testing.T) (*websocket.Conn, pageMessage) 
 	}
 	t.Cleanup(func() { socket.CloseNow() })
 	return socket, readPageMessage(t, socket)
+}
+
+// storeSnapshot stores a snapshot as a page does, under a content
+// encoding when one is given, and returns the answer's status.
+func (c *parkedContainer) storeSnapshot(t *testing.T, body []byte, encoding string) int {
+	t.Helper()
+	request, err := http.NewRequest(http.MethodPut, c.server.URL+"/"+routeSnapshot, bytes.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if encoding != "" {
+		request.Header.Set(headerContentEncoding, encoding)
+	}
+	response, err := http.DefaultClient.Do(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	response.Body.Close()
+	return response.StatusCode
 }
 
 // readPageMessage reads one text message a page was sent.
@@ -140,17 +160,8 @@ func TestParkAndResume(t *testing.T) {
 	if asked := readPageMessage(t, first); asked.Type != toPagePark {
 		t.Fatalf("the page was asked %+v, not to park", asked)
 	}
-	request, err := http.NewRequest(http.MethodPut, container.server.URL+"/"+routeSnapshot, bytes.NewReader(snapshot))
-	if err != nil {
-		t.Fatal(err)
-	}
-	response, err := http.DefaultClient.Do(request)
-	if err != nil {
-		t.Fatal(err)
-	}
-	response.Body.Close()
-	if response.StatusCode != http.StatusNoContent {
-		t.Fatalf("storing the snapshot answered %d", response.StatusCode)
+	if status := container.storeSnapshot(t, snapshot, ""); status != http.StatusNoContent {
+		t.Fatalf("storing the snapshot answered %d", status)
 	}
 	say(t, first, pageMessage{Type: fromPageParked})
 	if err := <-parked; err != nil {
@@ -287,17 +298,8 @@ func TestSnapshotOnlyWhenWanted(t *testing.T) {
 	container := newParkedContainer(t)
 	address := container.server.URL + "/" + routeSnapshot
 
-	request, err := http.NewRequest(http.MethodPut, address, strings.NewReader("unasked"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	stored, err := http.DefaultClient.Do(request)
-	if err != nil {
-		t.Fatal(err)
-	}
-	stored.Body.Close()
-	if stored.StatusCode != http.StatusConflict {
-		t.Errorf("storing a snapshot nobody asked for answered %d", stored.StatusCode)
+	if status := container.storeSnapshot(t, []byte("unasked"), ""); status != http.StatusConflict {
+		t.Errorf("storing a snapshot nobody asked for answered %d", status)
 	}
 
 	fetched, err := http.Get(address)
@@ -349,5 +351,42 @@ func TestStatsString(t *testing.T) {
 	want := "bytes=33427436 encodeMs=18 storeMs=98"
 	if got := stats.String(); got != want {
 		t.Errorf("stats read %q, want %q", got, want)
+	}
+}
+
+// TestSnapshotEncodingKept checks that a snapshot a page stored
+// compressed is served to the next page as compressed, so that the
+// browser there undoes what the browser before did. One page stores
+// gzip under its content encoding, and the fetch, whose client undoes
+// gzip as a browser does, reads the bytes from before the compression.
+func TestSnapshotEncodingKept(t *testing.T) {
+	container := newParkedContainer(t)
+	conversation := container.conversation
+	plain := []byte("the guest's memory, which compresses well")
+	var compressed bytes.Buffer
+	writer := gzip.NewWriter(&compressed)
+	writer.Write(plain)
+	writer.Close()
+
+	first, _ := container.openPage(t)
+	parked := parkOutcomeOf(conversation)
+	readPageMessage(t, first)
+	if status := container.storeSnapshot(t, compressed.Bytes(), encodingGzip); status != http.StatusNoContent {
+		t.Fatalf("storing the snapshot answered %d", status)
+	}
+	say(t, first, pageMessage{Type: fromPageParked})
+	if err := <-parked; err != nil {
+		t.Fatal(err)
+	}
+
+	container.openPage(t)
+	served, err := http.Get(container.server.URL + "/" + routeSnapshot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ := io.ReadAll(served.Body)
+	served.Body.Close()
+	if !bytes.Equal(body, plain) {
+		t.Errorf("the next page read %q", body)
 	}
 }

@@ -11,6 +11,7 @@ import (
 	"os"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/coder/websocket"
@@ -51,6 +52,16 @@ const (
 const (
 	snapshotFile = "snapshot.bin"
 	snapshotMode = 0o600
+)
+
+// A page may compress the snapshot before storing it, and says so in
+// the request's content encoding. The supervisor keeps the bytes as
+// they came and serves them under the same encoding, so the next page's
+// browser undoes the compression. gzip is the one encoding every
+// browser both makes and undoes.
+const (
+	headerContentEncoding = "Content-Encoding"
+	encodingGzip          = "gzip"
 )
 
 // temporarySuffix names the file a snapshot is written to before it
@@ -316,9 +327,13 @@ type parking struct {
 	logf         func(format string, args ...any)
 
 	// path is the snapshot's file, and limit the most bytes a page may
-	// store there.
+	// store there. encoding is the content encoding the page stored the
+	// snapshot under, empty for none.
 	path  string
 	limit int64
+
+	mu       sync.Mutex
+	encoding string
 
 	// movable says the container's program runs where the guest can keep
 	// it (the plan's Movable), and running whether the program has been
@@ -379,7 +394,12 @@ func (p *parking) serveSnapshot(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, errSnapshotState.Error(), http.StatusConflict)
 			return
 		}
-		if err := p.store(http.MaxBytesReader(w, r.Body, p.limit)); err != nil {
+		encoding := r.Header.Get(headerContentEncoding)
+		if encoding != "" && encoding != encodingGzip {
+			http.Error(w, "a snapshot is stored as it is or under gzip", http.StatusUnsupportedMediaType)
+			return
+		}
+		if err := p.store(http.MaxBytesReader(w, r.Body, p.limit), encoding); err != nil {
 			p.logf("storing the snapshot: %v", err)
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
@@ -391,6 +411,12 @@ func (p *parking) serveSnapshot(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, errSnapshotState.Error(), http.StatusNotFound)
 			return
 		}
+		p.mu.Lock()
+		encoding := p.encoding
+		p.mu.Unlock()
+		if encoding != "" {
+			w.Header().Set(headerContentEncoding, encoding)
+		}
 		http.ServeFile(w, r, p.path)
 
 	default:
@@ -399,8 +425,9 @@ func (p *parking) serveSnapshot(w http.ResponseWriter, r *http.Request) {
 }
 
 // store writes a snapshot to its file, replacing the file in one step
-// so that a snapshot half written is never one a page is given.
-func (p *parking) store(body io.Reader) error {
+// so that a snapshot half written is never one a page is given, and
+// remembers the content encoding the bytes are under.
+func (p *parking) store(body io.Reader, encoding string) error {
 	temporary := p.path + temporarySuffix
 	file, err := os.OpenFile(temporary, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, snapshotMode)
 	if err != nil {
@@ -414,8 +441,14 @@ func (p *parking) store(body io.Reader) error {
 		os.Remove(temporary)
 		return err
 	}
-	p.logf("snapshot stored: %d bytes", written)
-	return os.Rename(temporary, p.path)
+	if err := os.Rename(temporary, p.path); err != nil {
+		return err
+	}
+	p.mu.Lock()
+	p.encoding = encoding
+	p.mu.Unlock()
+	p.logf("snapshot stored: %d bytes %s", written, encoding)
+	return nil
 }
 
 // discard removes the snapshot, which is stale from the moment a page
