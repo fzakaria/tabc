@@ -23,6 +23,8 @@ import (
 	"strings"
 	"syscall"
 
+	"golang.org/x/term"
+
 	"github.com/fzakaria/tabc/internal/guest"
 )
 
@@ -87,33 +89,46 @@ const (
 
 // flagPorts runs the port watcher (ports.go) in place of a container,
 // and flagExec a second program in the container that is already there
-// (exec.go).
+// (exec.go). flagRaw runs the container's program on init's terminal
+// with the terminal made raw first.
 const (
 	flagPorts = "--ports"
 	flagExec  = "--exec"
+	flagRaw   = "--raw"
 )
 
 // usage is what init is called with.
-const usage = "usage: tabc-init <spec.json> | --ports | --exec <spec>"
+const usage = "usage: tabc-init [--raw] <spec.json> | --ports | --exec <spec>"
 
 // The words init is called with, its own name included, for each of
-// its three jobs.
+// its jobs.
 const (
 	wordsForContainer = 2
 	wordsForExec      = 3
+	wordsForRaw       = 3
 )
 
 func main() {
+	specPath := os.Args[len(os.Args)-1]
 	switch {
 	case len(os.Args) == wordsForExec && os.Args[1] == flagExec:
 		execInContainer(os.Args[2])
+	case len(os.Args) == wordsForRaw && os.Args[1] == flagRaw:
+		// A container that can be moved to another tab and whose program
+		// was to run on pipes: the guest keeps a terminal through a
+		// snapshot and never a pipe, so the page gave init a terminal.
+		// Raw, the terminal carries bytes as pipes would: nothing
+		// echoed, no key a signal, no newline rewritten.
+		if _, err := term.MakeRaw(int(os.Stdin.Fd())); err != nil {
+			fail(exitSetupFailed, fmt.Errorf("making the terminal raw: %w", err))
+		}
 	case len(os.Args) != wordsForContainer:
 		fail(exitSetupFailed, errors.New(usage))
 	case os.Args[1] == flagPorts:
 		watchPorts()
 	}
 
-	spec, err := readSpec(os.Args[1])
+	spec, err := readSpec(specPath)
 	if err != nil {
 		fail(exitSetupFailed, err)
 	}
