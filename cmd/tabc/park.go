@@ -25,8 +25,10 @@ import (
 // and the units they are printed in.
 const (
 	statSnapshotBytes = "bytes"
+	statStoredBytes   = "storedBytes"
 	statSnapshotMs    = "snapshotMs"
 	statEncodeMs      = "encodeMs"
+	statCompressMs    = "compressMs"
 	statStoreMs       = "storeMs"
 	bytesPerMiB       = 1 << 20
 )
@@ -55,8 +57,9 @@ func park(inv cli.Invocation, out io.Writer) error {
 	}
 
 	stats := result.Stats
-	fmt.Fprintf(out, "parked %s: a snapshot of %.1f MiB (guest saved in %.0f ms, encoded in %.0f ms, stored in %.0f ms)\n",
-		record.ID, stats[statSnapshotBytes]/bytesPerMiB, stats[statSnapshotMs], stats[statEncodeMs], stats[statStoreMs])
+	fmt.Fprintf(out, "parked %s: a snapshot of %.1f MiB, %.1f MiB as stored (guest saved in %.0f ms, encoded in %.0f ms, compressed in %.0f ms, stored in %.0f ms)\n",
+		record.ID, stats[statSnapshotBytes]/bytesPerMiB, stats[statStoredBytes]/bytesPerMiB,
+		stats[statSnapshotMs], stats[statEncodeMs], stats[statCompressMs], stats[statStoreMs])
 	if record.URL != "" {
 		fmt.Fprintf(out, "open this page to resume the container:\n  %s\n", record.URL)
 	}

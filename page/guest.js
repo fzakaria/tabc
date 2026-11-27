@@ -123,6 +123,15 @@ const ToSupervisor = Object.freeze({
 // parkTimeout).
 const PARK_STORE_TIMEOUT_MS = 90_000;
 
+// A snapshot is mostly the guest's memory and compresses to about a
+// seventh. Compressing takes the page longer than sending the bytes to
+// a supervisor on the same machine does, and far less long than sending
+// them from anywhere else, so a page compresses unless its address is
+// one of the names a machine has for itself.
+const SNAPSHOT_ENCODING = "gzip";
+const ENCODING_HEADER = "Content-Encoding";
+const OWN_MACHINE = ["127.0.0.1", "localhost", "[::1]"];
+
 // How a program's end is reported by the SDK, and the status a program
 // ended by a signal is given, as a shell gives one.
 const END_EXIT = "exit";
@@ -791,14 +800,30 @@ async function park(vm) {
       const bytes = encodeSnapshot(snapshot);
       const encoded = performance.now();
 
-      const response = await fetch(SNAPSHOT_URL, { method: "PUT", body: bytes, signal });
+      // Compressed for a supervisor that is far away. The supervisor is
+      // told the encoding, and serves the snapshot under the same one,
+      // so the next page's browser undoes the compression.
+      let body = bytes;
+      const headers = {};
+      if (!OWN_MACHINE.includes(location.hostname)) {
+        const packed = new Blob([bytes])
+          .stream()
+          .pipeThrough(new CompressionStream(SNAPSHOT_ENCODING));
+        body = new Uint8Array(await new Response(packed).arrayBuffer());
+        headers[ENCODING_HEADER] = SNAPSHOT_ENCODING;
+      }
+      const compressed = performance.now();
+
+      const response = await fetch(SNAPSHOT_URL, { method: "PUT", body, headers, signal });
       if (!response.ok) {
         throw new Error(`the supervisor did not take the snapshot: ${response.status}`);
       }
       stats.snapshotMs = saved - asked;
       stats.encodeMs = encoded - saved;
-      stats.storeMs = performance.now() - encoded;
+      stats.compressMs = compressed - encoded;
+      stats.storeMs = performance.now() - compressed;
       stats.bytes = bytes.length;
+      stats.storedBytes = body.length;
       stats.freeBytes = snapshot.freeBytes ?? 0;
     },
   });
