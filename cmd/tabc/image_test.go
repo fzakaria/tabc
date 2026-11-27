@@ -37,6 +37,38 @@ func TestParseImageRun(t *testing.T) {
 	}
 }
 
+// TestParseImageRunEntrypoint checks --entrypoint: a value replaces the
+// image's entry point with that one word, an empty value removes the
+// entry point, and without the flag the image's own stays.
+func TestParseImageRunEntrypoint(t *testing.T) {
+	replaced, err := parseImageRun([]string{"--entrypoint", "/bin/sh", "alpine", "-c", "true"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !replaced.replaceEntrypoint || !reflect.DeepEqual(replaced.entrypoint, []string{"/bin/sh"}) {
+		t.Errorf("--entrypoint /bin/sh: got %q, replace %v", replaced.entrypoint, replaced.replaceEntrypoint)
+	}
+	if !reflect.DeepEqual(replaced.command, []string{"-c", "true"}) {
+		t.Errorf("the words after the image: got %q", replaced.command)
+	}
+
+	removed, err := parseImageRun([]string{"--entrypoint=", "alpine", "ls"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !removed.replaceEntrypoint || len(removed.entrypoint) != 0 {
+		t.Errorf("--entrypoint=: got %q, replace %v", removed.entrypoint, removed.replaceEntrypoint)
+	}
+
+	kept, err := parseImageRun([]string{"alpine", "ls"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if kept.replaceEntrypoint {
+		t.Error("no --entrypoint, and the image's entry point was replaced")
+	}
+}
+
 // TestParseImageRunErrors checks the three ways the words can be wrong:
 // no image, a flag tabc does not have, and a flag missing its value.
 func TestParseImageRunErrors(t *testing.T) {

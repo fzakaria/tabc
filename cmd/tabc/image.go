@@ -66,6 +66,11 @@ type imageRun struct {
 	networks    []string
 	image       string
 	command     []string
+
+	// entrypoint replaces the image's entry point when
+	// replaceEntrypoint is set, an empty one included.
+	entrypoint        []string
+	replaceEntrypoint bool
 }
 
 // parseImageRun reads the words after `run`: flags, then the image,
@@ -121,6 +126,17 @@ func parseImageRun(args []string) (imageRun, error) {
 			var entry string
 			entry, err = value(name, inline, hasInline)
 			parsed.env = append(parsed.env, entry)
+		case "--entrypoint":
+			// One word in place of the image's entry point, as with
+			// docker run, and no word at all to run the words after the
+			// image as they are.
+			var word string
+			word, err = value(name, inline, hasInline)
+			parsed.replaceEntrypoint = true
+			parsed.entrypoint = nil
+			if word != "" {
+				parsed.entrypoint = []string{word}
+			}
 		case "-w", "--workdir":
 			parsed.cwd, err = value(name, inline, hasInline)
 		case "-u", "--user":
@@ -166,7 +182,7 @@ func parseImageRun(args []string) (imageRun, error) {
 			return parsed, err
 		}
 	}
-	return parsed, errors.New("usage: tabc run [-it] [--open | --link] [--pull] [--name name] [--network network] [-p [address:]host:container] [-v directory:/path[:ro]] [-e NAME=value] [-w dir] [-u user] [-m memory] [--cpus count] <image> [program...]")
+	return parsed, errors.New("usage: tabc run [-it] [--open | --link] [--pull] [--name name] [--network network] [-p [address:]host:container] [-v directory:/path[:ro]] [-e NAME=value] [-w dir] [-u user] [--entrypoint program] [-m memory] [--cpus count] <image> [program...]")
 }
 
 // parsePublish reads a published port as `docker run -p` writes one:
@@ -285,7 +301,14 @@ func runImage(args []string) (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	overrides := image.Overrides{Command: parsed.command, Env: parsed.env, Cwd: parsed.cwd, User: parsed.user}
+	overrides := image.Overrides{
+		Command:           parsed.command,
+		Entrypoint:        parsed.entrypoint,
+		ReplaceEntrypoint: parsed.replaceEntrypoint,
+		Env:               parsed.env,
+		Cwd:               parsed.cwd,
+		User:              parsed.user,
+	}
 	if parsed.terminal {
 		overrides.Env = append([]string{envTerm}, overrides.Env...)
 	}
