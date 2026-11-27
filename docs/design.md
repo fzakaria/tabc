@@ -222,6 +222,61 @@ asked is the program's process on the host. An engine passes
 in the pid file, so the engine has a process to wait on. A command
 that goes away takes its program with it.
 
+## Moving to another tab
+
+A container in a browser somebody brought ends when that tab does. One
+started with `tabc run --movable` can be moved first. This is a spike:
+it works, and its edges are listed below.
+
+`tabc park <id>` asks the supervisor, which asks the page. The page has
+the SDK take a snapshot: every task in the guest is brought to a point
+where its whole state is in the guest's memory, and the memory is
+copied, less the pages the kernel says are free. The guest waits there
+while the page sends the snapshot to the supervisor with one PUT, and
+stops for good only once the supervisor has it. A snapshot that does
+not arrive is given up, and the guest runs on. The supervisor keeps the
+snapshot in the container's state directory and lets the page go. The
+container is parked: it has no page, and its supervisor waits.
+
+The next page to open the container's address is told to restore. It
+fetches the snapshot, hands it to the SDK in place of booting, and
+takes over the terminal session the program is on. The program is the
+same process, with what it had in memory, and its clock of elapsed time
+has not moved while it was parked.
+
+Only a terminal session of the guest's outlives a restore, never a
+program on pipes. So a movable container's program always runs on a
+terminal session. If the container asked for no terminal, the guest's
+init makes the session raw (`tabc-init --raw`), which carries bytes
+unchanged, and that is where the edges are: the program sees a terminal
+on its three descriptors, its error output arrives with its output, and
+the end of its input never reaches it.
+
+A snapshot is 32 MiB for a shell in Alpine and 58 MiB for Redis, of a
+guest with 1024 MiB. gzip takes the first to 4.4 MiB and the second to
+12 MiB, and a page applies it unless the supervisor is on the page's
+own machine, where sending the bytes is quicker than compressing them.
+On one machine, with the second browser opened the moment the first is
+closed, the shell's program is stopped for half a second.
+
+What the supervisor holds is kept, since the supervisor is the same
+process throughout: where the output goes, published ports, names on
+tabc networks, and input and signals that arrive with no page, which
+wait for the next one. SIGKILL ends a parked container outright.
+
+What only the old page held is lost:
+
+- Connections. The guest's sockets are in the snapshot and their other
+  ends are not. A guest program that writes to one is answered with a
+  reset; one that only waits to read waits for ever. A server in the
+  guest keeps its listening socket and accepts new connections.
+- Second programs. `tabc exec` runs a program on pipes, which the
+  restore hangs up.
+- Output the program writes between the guest resuming and the page
+  taking the terminal session over, a few milliseconds. The guest keeps
+  the session's last 64 KiB for a page to replay, with no way to ask
+  for only what was missed, so the page does not ask.
+
 ## What is missing
 
 UDP, a CPU limit that throttles, checkpointing, building images without Docker.
