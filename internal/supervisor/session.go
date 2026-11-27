@@ -3,6 +3,7 @@ package supervisor
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"sync"
@@ -34,6 +35,7 @@ const (
 	// in a second tab.
 	toPageWelcome = "welcome"
 	toPageTaken   = "taken"
+	// The messages that park a guest and resume one are in park.go.
 
 	fromPageReady = "ready"
 	fromPageExit  = "exit"
@@ -68,6 +70,11 @@ type pageMessage struct {
 	Spec     string `json:"spec,omitempty"`
 	Terminal bool   `json:"terminal,omitempty"`
 	Term     string `json:"term,omitempty"`
+	// Restore, in a welcome, tells the page to resume the parked guest
+	// from its snapshot in place of booting one, and Stats are a page's
+	// numbers for a park or a resume (park.go).
+	Restore bool  `json:"restore,omitempty"`
+	Stats   Stats `json:"stats,omitempty"`
 }
 
 // session is the supervisor's conversation with the container's page.
@@ -87,16 +94,27 @@ type session struct {
 	exit   chan int
 	failed chan string
 
-	// socket is the page's connection, set once the page connects.
+	// socket is the page's connection, set once the page connects, and
+	// gone is closed when the page that is the container goes away.
 	mu     sync.Mutex
 	socket *websocket.Conn
 	gone   chan struct{}
+
+	// What a container's move to another page needs (park.go): where the
+	// move stands, a condition signalled when that changes, the answer
+	// the park in progress waits for, the signals kept for the page that
+	// resumes, and what to do once a page has resumed.
+	phase       phase
+	changed     *sync.Cond
+	parkAnswer  chan parkOutcome
+	heldSignals []string
+	onResumed   func()
 
 	readyOnce sync.Once
 }
 
 func newSession(stdout, stderr io.Writer, logf func(string, ...any)) *session {
-	return &session{
+	s := &session{
 		stdout: stdout,
 		stderr: stderr,
 		logf:   logf,
@@ -105,6 +123,8 @@ func newSession(stdout, stderr io.Writer, logf func(string, ...any)) *session {
 		failed: make(chan string, 1),
 		gone:   make(chan struct{}),
 	}
+	s.changed = sync.NewCond(&s.mu)
+	return s
 }
 
 // serve is the page's WebSocket: it reads what the page sends until the
@@ -117,7 +137,8 @@ func (s *session) serve(w http.ResponseWriter, r *http.Request) {
 	socket.SetReadLimit(maxMessage)
 
 	// One page per container: a second connection is not the page the
-	// supervisor started.
+	// supervisor started. The first page to connect after the guest was
+	// parked is the container's next page, and is told to restore.
 	s.mu.Lock()
 	if s.socket != nil {
 		s.mu.Unlock()
@@ -127,13 +148,17 @@ func (s *session) serve(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.socket = socket
+	restore := s.phase == phaseParked
+	if restore {
+		s.setPhase(phaseResuming)
+	}
 	s.mu.Unlock()
 	s.logf("page connected")
-	if err := s.send(pageMessage{Type: toPageWelcome}); err != nil {
+	defer s.left(socket)
+	defer socket.CloseNow()
+	if err := s.send(pageMessage{Type: toPageWelcome, Restore: restore}); err != nil {
 		return
 	}
-	defer close(s.gone)
-	defer socket.CloseNow()
 
 	ctx := r.Context()
 	for {
@@ -175,7 +200,23 @@ func (s *session) serve(w http.ResponseWriter, r *http.Request) {
 			if s.onListen != nil {
 				s.onListen(message.Port, message.Type == fromPageListen)
 			}
+		case fromPageParked:
+			// The page has stopped its guest and is let go.
+			if s.parked(socket, message.Stats) {
+				socket.Close(websocket.StatusNormalClosure, "parked")
+				return
+			}
+		case fromPageParkFailed:
+			s.endPark(parkOutcome{err: errors.New(message.Message)})
+		case fromPageResumed:
+			s.resumed(message.Stats)
 		case fromPageError:
+			// A page that could not restore the snapshot is not the
+			// container's failure: the next page may restore it.
+			if s.resumeFailed(socket, message.Message) {
+				socket.Close(websocket.StatusNormalClosure, "the guest stays parked")
+				return
+			}
 			select {
 			case s.failed <- message.Message:
 			default:
@@ -193,12 +234,22 @@ func (s *session) send(message pageMessage) error {
 	return s.write(websocket.MessageText, data)
 }
 
-// sendInput writes bytes for the program's input.
+// sendInput writes bytes for the program's input. Input for a guest
+// that is being moved to another page waits for the page that resumes
+// it.
 func (s *session) sendInput(data []byte) error {
 	framed := make([]byte, 0, len(data)+1)
 	framed = append(framed, streamStdin)
 	framed = append(framed, data...)
-	return s.write(websocket.MessageBinary, framed)
+	// A park may begin between the wait and the write, and the bytes
+	// then wait for the next page like any that came later.
+	for {
+		s.waitLive()
+		err := s.write(websocket.MessageBinary, framed)
+		if !errors.Is(err, errParked) {
+			return err
+		}
+	}
 }
 
 // write sends one message, one at a time: input, signals and sizes come
@@ -207,6 +258,9 @@ func (s *session) write(kind websocket.MessageType, data []byte) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.socket == nil {
+		if s.phase == phaseParked {
+			return errParked
+		}
 		return io.ErrClosedPipe
 	}
 	return s.socket.Write(context.Background(), kind, data)

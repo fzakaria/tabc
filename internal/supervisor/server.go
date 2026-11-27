@@ -37,6 +37,7 @@ const (
 	routeRelay    = "relay"
 	routeExec     = "ex"
 	routeVolume   = "vol"
+	routeSnapshot = "snapshot"
 	routeUnkernel = "unkernel"
 	routeXterm    = "xterm"
 	netLookup     = "dns"
@@ -60,6 +61,9 @@ type pageConfig struct {
 	Network bool `json:"network"`
 	// MirrorPorts has the page watch which ports the program opens.
 	MirrorPorts bool `json:"mirrorPorts"`
+	// Movable has the page run the program where the guest keeps it
+	// through a snapshot, so the container can be parked (park.go).
+	Movable bool `json:"movable"`
 	// Volumes are where in the guest the page mounts each volume, and
 	// whether read-only.
 	Volumes []pageVolume `json:"volumes"`
@@ -89,6 +93,7 @@ type server struct {
 	session  *session
 	inbound  *inbound
 	execs    *execs
+	parking  *parking
 	resolver *net.Resolver
 
 	// volumes are the directories of the host the container mounts, in
@@ -151,6 +156,8 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		s.inbound.serveRelay(w, r)
 	case routeExec:
 		s.execs.serve(w, r)
+	case routeSnapshot:
+		s.parking.serveSnapshot(w, r)
 	case routeVolume:
 		// vol/<number>/<operation>.
 		number, op, _ := strings.Cut(remainder, "/")

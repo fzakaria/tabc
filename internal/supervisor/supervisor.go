@@ -258,6 +258,17 @@ func run(options Options, dir string, logger *log.Logger, logFile *os.File) (int
 	// Second programs, which `tabc exec` asks for once the container's
 	// own is running.
 	second := newExecs(conversation, guestSpec, terminalType, logger.Printf)
+
+	// The container's move to another page, which `tabc park` starts.
+	// The snapshot is the guest's memory at most, and is stale once a
+	// page has resumed from it.
+	guestMemoryMiB := memoryMiB(planned.MemoryBytes)
+	move := newParking(conversation, filepath.Join(dir, snapshotFile),
+		int64(guestMemoryMiB)*bytesPerMiB+snapshotSlackBytes, logger.Printf)
+	move.movable = planned.Movable
+	move.running = second.running.Load
+	conversation.onResumed = move.discard
+	defer move.discard()
 	pages := &server{
 		token: token,
 		share: options.Share,
@@ -267,10 +278,11 @@ func run(options Options, dir string, logger *log.Logger, logFile *os.File) (int
 			Rows:        orDefault(planned.Rows, defaultRows),
 			Term:        terminalType,
 			Title:       orTitle(planned.Title, options.ID),
-			MemoryMiB:   memoryMiB(planned.MemoryBytes),
+			MemoryMiB:   guestMemoryMiB,
 			CPUs:        guestCPUs(planned.CPUs, runtime.NumCPU()),
 			Network:     true,
 			MirrorPorts: options.MirrorPorts,
+			Movable:     planned.Movable,
 			Volumes:     mounted,
 		},
 		spec:     guestSpec,
@@ -279,6 +291,7 @@ func run(options Options, dir string, logger *log.Logger, logFile *os.File) (int
 		session:  conversation,
 		inbound:  incoming,
 		execs:    second,
+		parking:  move,
 		resolver: resolverFor(planned.ResolvConfPath),
 		root:     options.Root,
 		networks: networkNames(planned.Networks),
@@ -336,7 +349,7 @@ func run(options Options, dir string, logger *log.Logger, logFile *os.File) (int
 		default:
 			return fmt.Errorf("unknown request %q", words[0])
 		}
-	}, map[string]takeover{requestExec: second.handle})
+	}, map[string]takeover{requestExec: second.handle, requestPark: move.handle})
 
 	// The browser: a headless one of the container's own, or whichever
 	// browser is going to be shown the page.
@@ -485,18 +498,29 @@ func run(options Options, dir string, logger *log.Logger, logFile *os.File) (int
 
 		case name := <-killed:
 			logger.Printf("kill %s", name)
+			// A parked container has no program running to take a
+			// signal. SIGKILL ends the container as it would end the
+			// program; any other signal waits for the page that resumes.
+			if conversation.holdSignal(name) {
+				if name == signalKill {
+					logger.Printf("killed while parked")
+					return finish(dir, record, logger, signalStatusBase+signals.Number(signalKill)), nil
+				}
+				logger.Printf("no page to take %s, which waits for the page that resumes", name)
+				continue
+			}
 			if err := conversation.send(pageMessage{Type: toPageKill, Signal: name}); err != nil {
 				logger.Printf("kill: %v", err)
 			}
 			// SIGKILL cannot be refused by the program, so a guest that
 			// does not report the death is a guest that is stuck.
-			if name == "KILL" && forced == nil {
+			if name == signalKill && forced == nil {
 				forced = time.After(killGrace)
 			}
 
 		case <-forced:
 			logger.Printf("the guest did not report the kill; ending the container")
-			return finish(dir, record, logger, signalStatusBase+signals.Number("KILL")), nil
+			return finish(dir, record, logger, signalStatusBase+signals.Number(signalKill)), nil
 
 		case message := <-conversation.failed:
 			fmt.Fprintf(stderr, "tabc: the page failed: %s\n", message)

@@ -100,6 +100,15 @@ type Plan struct {
 	// page calls the container.
 	Browser Browser `json:"browser,omitempty"`
 	Title   string  `json:"title,omitempty"`
+
+	// Movable has the program run where the guest can keep it through a
+	// snapshot, so that the container can be parked and resumed in
+	// another browser tab (`tabc park`). A program with a terminal runs
+	// no differently. A program without one is given a terminal the
+	// guest keeps, in raw mode, in place of its three pipes: its error
+	// output arrives with its output, and the end of its input does not
+	// reach it.
+	Movable bool `json:"movable,omitempty"`
 }
 
 // Network is one tabc network a container is on, and the names other
