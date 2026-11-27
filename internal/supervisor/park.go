@@ -198,19 +198,32 @@ func (s *session) parkRefusal() error {
 	return nil
 }
 
-// endPark answers the park in progress, if there is one, and makes the
-// page the container again when the park failed.
+// endPark answers the park in progress, if there is one. A park that
+// failed makes the page the container again, and the page takes the
+// signals that were held while the park was tried.
 func (s *session) endPark(outcome parkOutcome) {
 	s.mu.Lock()
-	defer s.mu.Unlock()
+	var held []string
 	if s.phase == phaseParking && outcome.err != nil {
 		s.setPhase(phaseLive)
+		held, s.heldSignals = s.heldSignals, nil
 	}
-	if s.parkAnswer == nil {
-		return
+	if s.parkAnswer != nil {
+		s.parkAnswer <- outcome
+		s.parkAnswer = nil
 	}
-	s.parkAnswer <- outcome
-	s.parkAnswer = nil
+	s.mu.Unlock()
+
+	s.sendSignals(held)
+}
+
+// sendSignals sends the page signals that were held for one.
+func (s *session) sendSignals(held []string) {
+	for _, name := range held {
+		if err := s.send(pageMessage{Type: toPageKill, Signal: name}); err != nil {
+			s.logf("kill %s, held for a page: %v", name, err)
+		}
+	}
 }
 
 // parked records that the page on socket stored the snapshot and stopped
@@ -248,11 +261,7 @@ func (s *session) resumed(stats Stats) {
 	if s.onResumed != nil {
 		s.onResumed()
 	}
-	for _, name := range held {
-		if err := s.send(pageMessage{Type: toPageKill, Signal: name}); err != nil {
-			s.logf("kill %s after the resume: %v", name, err)
-		}
-	}
+	s.sendSignals(held)
 }
 
 // resumeFailed handles an error from the page on socket. A page that

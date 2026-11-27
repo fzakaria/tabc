@@ -390,3 +390,27 @@ func TestSnapshotEncodingKept(t *testing.T) {
 		t.Errorf("the next page read %q", body)
 	}
 }
+
+// TestSignalHeldThroughRefusedPark checks that a signal which arrives
+// while a page is saving the guest is not lost when the page then
+// cannot save it: the page is the container again, and is sent the
+// signal. A WebSocket client stands in for the page.
+func TestSignalHeldThroughRefusedPark(t *testing.T) {
+	container := newParkedContainer(t)
+	conversation := container.conversation
+	page, _ := container.openPage(t)
+
+	parked := parkOutcomeOf(conversation)
+	readPageMessage(t, page)
+	if !conversation.holdSignal("TERM") {
+		t.Fatal("a signal was not held while the guest was being saved")
+	}
+	say(t, page, pageMessage{Type: fromPageParkFailed, Message: "a task did not park"})
+	if err := <-parked; err == nil {
+		t.Fatal("the refused park succeeded")
+	}
+
+	if sent := readPageMessage(t, page); sent.Type != toPageKill || sent.Signal != "TERM" {
+		t.Errorf("after the refused park the page was sent %+v", sent)
+	}
+}
