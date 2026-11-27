@@ -16,7 +16,14 @@
 // but then the guest's network has to be one the SDK builds there, and
 // this guest's network is the supervisor (supervisorNet).
 
-import { checkSupport, createKernel, FsError, MemoryFs } from "./unkernel/web.mjs";
+import {
+  checkSupport,
+  createKernel,
+  decodeSnapshot,
+  encodeSnapshot,
+  FsError,
+  MemoryFs,
+} from "./unkernel/web.mjs";
 import { State, ToGuest, ToPage } from "./messages.js";
 
 // What the supervisor serves next to this page.
@@ -30,6 +37,7 @@ const NET_TCP_URL = "net/tcp";
 const INBOUND_URL = "in";
 const EXEC_URL = "ex";
 const VOLUME_URL = "vol/";
+const SNAPSHOT_URL = "snapshot";
 
 // Where the guest finds the image, and init with the container's spec.
 const LOWER_DIR = "/tabc/lower";
@@ -39,6 +47,9 @@ const INIT_NAME = "init";
 const PORTS_FLAG = "--ports";
 // The argument that makes init run a second program in the container.
 const EXEC_FLAG = "--exec";
+// The argument that makes init put the terminal the program is on in
+// raw mode, where the terminal carries bytes as pipes would.
+const RAW_FLAG = "--raw";
 const SPEC_NAME = "spec.json";
 const EXECUTABLE = 0o755;
 
@@ -91,6 +102,7 @@ const FromSupervisor = Object.freeze({
   EXEC: "exec",
   WELCOME: "welcome",
   TAKEN: "taken",
+  PARK: "park",
 });
 const ToSupervisor = Object.freeze({
   READY: "ready",
@@ -99,7 +111,17 @@ const ToSupervisor = Object.freeze({
   ERROR: "error",
   LISTEN: "listen",
   UNLISTEN: "unlisten",
+  PARKED: "parked",
+  PARK_FAILED: "parkfailed",
+  RESUMED: "resumed",
 });
+
+// How long the guest waits, stopped at the point the snapshot was taken,
+// for the snapshot to reach the supervisor. A snapshot that is not
+// stored by then is given up and the guest runs on. Less than the
+// supervisor waits for the page's answer (internal/supervisor,
+// parkTimeout).
+const PARK_STORE_TIMEOUT_MS = 90_000;
 
 // How a program's end is reported by the SDK, and the status a program
 // ended by a signal is given, as a shell gives one.
@@ -685,29 +707,46 @@ function statusOf(end) {
   return LOST_STATUS;
 }
 
-// Run the container's program on a terminal. The supervisor's messages
-// become the terminal's input, signals and size.
-async function runOnTerminal(vm, config, incoming) {
-  const pty = await vm.spawn(`${BIN_DIR}/${INIT_NAME}`, [`${BIN_DIR}/${SPEC_NAME}`], {
-    user: "root",
-    cwd: "/",
-    cols: config.cols,
-    rows: config.rows,
-    term: config.term,
-  });
-
+// Follow a program on a terminal session of the guest's, one just
+// spawned or one taken over after a restore, to the program's end. The
+// supervisor's messages become the terminal's input, signals and size.
+async function followTerminal(pty, config, incoming) {
   incoming.onInput = (bytes) => pty.write(bytes);
   // A terminal has no end of input to pass on: its program reads until
   // the program itself ends.
   incoming.onEof = () => {};
   incoming.onKill = (signal) => pty.kill(signal);
+  // A size is the program's business only when the container was given
+  // a terminal. The terminal a movable container's program is on in
+  // place of pipes is nobody's to resize.
   incoming.onResize = (cols, rows) => {
+    if (!config.terminal) {
+      return;
+    }
     pty.resize(cols, rows);
     postMessage({ t: ToPage.RESIZE, cols, rows });
   };
 
   await pump(pty.output, Stream.STDOUT);
   return statusOf(await pty.ended);
+}
+
+// Run the container's program on a terminal. A movable container's
+// terminal session is one the guest keeps when a restore takes the
+// session's connection away, for the next page to take over.
+async function runOnTerminal(vm, config, incoming) {
+  // A movable container that was to run on pipes has init make the
+  // terminal raw before the program starts.
+  const args = config.terminal ? [] : [RAW_FLAG];
+  const pty = await vm.spawn(`${BIN_DIR}/${INIT_NAME}`, [...args, `${BIN_DIR}/${SPEC_NAME}`], {
+    user: "root",
+    cwd: "/",
+    cols: config.cols,
+    rows: config.rows,
+    term: config.term,
+    detachable: config.movable,
+  });
+  return followTerminal(pty, config, incoming);
 }
 
 // Run the container's program on pipes.
@@ -736,6 +775,53 @@ async function runOnPipes(vm, incoming) {
   return statusOf(await program.ended);
 }
 
+// Save the guest for the supervisor, which was asked to park the
+// container, and stop it. The guest waits at the point the snapshot was
+// taken while the snapshot is stored, and stops for good only once the
+// supervisor has it; a snapshot that cannot be stored is given up and
+// the guest runs on, which is the rejection. Resolves with how long each
+// step took, in milliseconds, and the snapshot's size.
+async function park(vm) {
+  const asked = performance.now();
+  const stats = {};
+  await vm.snapshot({
+    commitTimeoutMs: PARK_STORE_TIMEOUT_MS,
+    commit: async (snapshot, signal) => {
+      const saved = performance.now();
+      const bytes = encodeSnapshot(snapshot);
+      const encoded = performance.now();
+
+      const response = await fetch(SNAPSHOT_URL, { method: "PUT", body: bytes, signal });
+      if (!response.ok) {
+        throw new Error(`the supervisor did not take the snapshot: ${response.status}`);
+      }
+      stats.snapshotMs = saved - asked;
+      stats.encodeMs = encoded - saved;
+      stats.storeMs = performance.now() - encoded;
+      stats.bytes = bytes.length;
+      stats.freeBytes = snapshot.freeBytes ?? 0;
+    },
+  });
+  return stats;
+}
+
+// Fetch the parked guest's snapshot from the supervisor. Resolves with
+// the snapshot and how long fetching and decoding took.
+async function fetchSnapshot() {
+  const asked = performance.now();
+  const response = await fetch(SNAPSHOT_URL);
+  if (!response.ok) {
+    throw new Error(`${SNAPSHOT_URL}: ${response.status}`);
+  }
+  const bytes = new Uint8Array(await response.arrayBuffer());
+  const fetched = performance.now();
+  const snapshot = decodeSnapshot(bytes);
+  return {
+    snapshot,
+    stats: { fetchMs: fetched - asked, decodeMs: performance.now() - fetched, bytes: bytes.length },
+  };
+}
+
 async function main() {
   await new Promise((resolve, reject) => {
     control.onopen = resolve;
@@ -747,10 +833,10 @@ async function main() {
   // first tab is, and a second guest would be a second container that
   // nothing is connected to.
   const first = await new Promise((resolve) => {
-    control.onmessage = (event) => resolve(JSON.parse(event.data).t);
-    control.onclose = () => resolve(FromSupervisor.TAKEN);
+    control.onmessage = (event) => resolve(JSON.parse(event.data));
+    control.onclose = () => resolve({ t: FromSupervisor.TAKEN });
   });
-  if (first !== FromSupervisor.WELCOME) {
+  if (first.t !== FromSupervisor.WELCOME) {
     control.onclose = null;
     setStatus(State.FAILED, "open elsewhere");
     openTerminal({ terminal: false, cols: NOTICE_COLS, rows: NOTICE_ROWS });
@@ -759,6 +845,10 @@ async function main() {
     );
     return;
   }
+  // A welcome that says restore: the container was parked, and this
+  // page resumes its guest from the snapshot the supervisor holds in
+  // place of booting one.
+  const resuming = first.restore === true;
 
   // What the supervisor sends before the program runs is kept, and
   // handed to the program's handlers once there are some.
@@ -776,6 +866,9 @@ async function main() {
   // The guest, once there is one, for requests that are about the guest
   // and not about the program.
   let guest = null;
+  // The park the supervisor asked for, once it has: a promise of the
+  // park's numbers. Null again when the guest could not be saved.
+  let parking = null;
   const dispatch = (message) => {
     if (message instanceof ArrayBuffer) {
       incoming.onInput(new Uint8Array(message).subarray(1));
@@ -810,6 +903,18 @@ async function main() {
         );
         return;
       }
+      if (t === FromSupervisor.PARK) {
+        // A guest that cannot be saved runs on, and the supervisor is
+        // told why.
+        setStatus(State.RUNNING, "parking");
+        parking = park(guest);
+        parking.catch((error) => {
+          parking = null;
+          setStatus(State.RUNNING, "running");
+          tell(ToSupervisor.PARK_FAILED, { message: String(error?.message ?? error) });
+        });
+        return;
+      }
     }
     if (incoming.onInput === null) {
       incoming.pending.push(event.data);
@@ -818,14 +923,15 @@ async function main() {
     dispatch(event.data);
   };
 
-  const [config, spec, init] = await Promise.all([
+  const [config, spec, init, parked] = await Promise.all([
     fetchJson(CONFIG_URL),
     fetch(SPEC_URL).then((response) => response.text()),
     fetch(INIT_URL).then((response) => response.arrayBuffer()),
+    resuming ? fetchSnapshot() : null,
   ]);
 
   postMessage({ t: ToPage.TITLE, title: config.title });
-  setStatus(State.WAITING, "booting");
+  setStatus(State.WAITING, resuming ? "resuming" : "booting");
   // What is typed into the page goes where the supervisor's input
   // goes, once the program is there to take it.
   addEventListener("message", ({ data }) => {
@@ -858,13 +964,21 @@ async function main() {
   const cpus = shared ? config.cpus : SINGLE_CPU;
 
   // The log's timestamps are how a start-up's time is accounted for.
-  tell(ToSupervisor.LOG, { message: `booting the kernel, ${cpus} CPUs` });
+  tell(ToSupervisor.LOG, {
+    message: `${resuming ? "resuming" : "booting"} the kernel, ${cpus} CPUs`,
+  });
+  const began = performance.now();
   const vm = await createKernel({
     kernel: new URL(cpus > SINGLE_CPU ? KERNEL_SMP_URL : KERNEL_ONE_CPU_URL, location.href).href,
     cmdline: KERNEL_CMDLINE,
     memoryMiB: config.memoryMiB,
     cpus,
     ...(config.network ? { net: supervisorNet() } : {}),
+    // A parked guest is resumed and not booted. The SDK refuses a
+    // snapshot this machine cannot resume: another kernel, another
+    // count of CPUs, a device or a mount the snapshot has and this
+    // machine lacks.
+    ...(resuming ? { restore: parked.snapshot } : {}),
     mounts: {
       [BIN_DIR]: { fs: bin, readOnly: true },
       [LOWER_DIR]: { fs: imageFs(), readOnly: true, requestTimeout: NO_TIMEOUT },
@@ -885,19 +999,49 @@ async function main() {
   if (booted !== cpus) {
     tell(ToSupervisor.LOG, { message: `the guest has ${booted} CPUs, not ${cpus}` });
   }
-
-  // The guest is up and the image is mounted: the container is created.
   guest = vm;
-  setStatus(State.WAITING, "created");
-  tell(ToSupervisor.READY);
-  await start;
+
+  let running;
+  if (resuming) {
+    // The program is in the guest already, on the terminal session the
+    // snapshot lists, which the restore left with no connection. Taking
+    // the session over is all there is to do. The session's earlier
+    // output is not asked for again: the page that parked sent it on.
+    const restored = performance.now();
+    const [session] = parked.snapshot.ttys ?? [];
+    if (session === undefined) {
+      throw new Error("the snapshot has no terminal session to take over");
+    }
+    const pty = await vm.attach(session, { replay: false });
+    tell(ToSupervisor.RESUMED, {
+      stats: {
+        ...parked.stats,
+        restoreMs: restored - began,
+        attachMs: performance.now() - restored,
+      },
+    });
+    running = followTerminal(pty, config, incoming);
+  } else {
+    // The guest is up and the image is mounted: the container is
+    // created.
+    setStatus(State.WAITING, "created");
+    tell(ToSupervisor.READY);
+    await start;
+    // A movable container's program is always on a terminal session,
+    // which is what the guest keeps through a snapshot.
+    running =
+      config.terminal || config.movable
+        ? runOnTerminal(vm, config, incoming)
+        : runOnPipes(vm, incoming);
+  }
   setStatus(State.RUNNING, "running");
 
+  // The port watcher is a program on pipes, which a restore ends, so a
+  // page that resumes starts one as a page that boots does. The watcher
+  // begins by reporting every port that is open.
   if (config.mirrorPorts) {
     watchPorts(vm).catch((error) => tell(ToSupervisor.LOG, { message: `port watcher: ${error}` }));
   }
-
-  const running = config.terminal ? runOnTerminal(vm, config, incoming) : runOnPipes(vm, incoming);
 
   // The program's handlers are set by the first synchronous part of
   // the run, after the spawn; what arrived before goes to them now.
@@ -913,6 +1057,21 @@ async function main() {
 
   const status = await running;
   clearInterval(flush);
+
+  // A guest that was parked stopped with its program still in it: the
+  // program's output ended, and the program did not. The supervisor is
+  // told once the last of the output has been sent, and lets this page
+  // go.
+  if (parking !== null) {
+    const stats = await parking.catch(() => null);
+    if (stats !== null) {
+      setStatus(State.WAITING, "parked");
+      show("\r\nThis container is parked. It carries on in the next tab that opens this page.\r\n");
+      tell(ToSupervisor.PARKED, { stats });
+      return;
+    }
+  }
+
   setStatus(State.EXITED, `exited (${status})`);
   tell(ToSupervisor.EXIT, { status });
 }
