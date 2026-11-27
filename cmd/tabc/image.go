@@ -185,6 +185,29 @@ func parseImageRun(args []string) (imageRun, error) {
 	return parsed, errors.New("usage: tabc run [-it] [--open | --link] [--pull] [--name name] [--network network] [-p [address:]host:container] [-v directory:/path[:ro]] [-e NAME=value] [-w dir] [-u user] [--entrypoint program] [-m memory] [--cpus count] <image> [program...]")
 }
 
+// parsePull reads the words after `pull`: one image.
+func parsePull(args []string) (string, error) {
+	if len(args) != 1 || strings.HasPrefix(args[0], "-") {
+		return "", errors.New("usage: tabc pull <image>")
+	}
+	return args[0], nil
+}
+
+// pullImage asks the registry for an image and puts the image in the
+// cache, where a later `tabc run` finds it without asking again.
+func pullImage(args []string) error {
+	reference, err := parsePull(args)
+	if err != nil {
+		return err
+	}
+	cache, err := image.CacheDir()
+	if err != nil {
+		return err
+	}
+	_, err = image.Get(context.Background(), reference, cache, image.AlwaysPull, os.Stderr)
+	return err
+}
+
 // parsePublish reads a published port as `docker run -p` writes one:
 // "8080:80", "127.0.0.1:8080:80", or "80" for the same port on both
 // sides. Without an address the port is published on loopback.

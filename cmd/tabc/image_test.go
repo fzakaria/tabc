@@ -69,6 +69,19 @@ func TestParseImageRunEntrypoint(t *testing.T) {
 	}
 }
 
+// TestParsePull checks that pull takes one image and nothing else.
+func TestParsePull(t *testing.T) {
+	reference, err := parsePull([]string{"redis:alpine"})
+	if err != nil || reference != "redis:alpine" {
+		t.Errorf("parsePull = %q, %v", reference, err)
+	}
+	for _, args := range [][]string{{}, {"alpine", "busybox"}, {"--platform", "linux/amd64", "alpine"}} {
+		if _, err := parsePull(args); err == nil {
+			t.Errorf("%v parsed", args)
+		}
+	}
+}
+
 // TestParseImageRunErrors checks the three ways the words can be wrong:
 // no image, a flag tabc does not have, and a flag missing its value.
 func TestParseImageRunErrors(t *testing.T) {

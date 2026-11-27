@@ -52,6 +52,7 @@ const (
 	commandDelete   = "delete"
 	commandFeatures = "features"
 	commandList     = "list"
+	commandPull     = "pull"
 )
 
 // exitError is tabc's own failure status, apart from a program's.
@@ -114,6 +115,8 @@ func main() {
 		if err == nil {
 			os.Exit(status)
 		}
+	case commandPull:
+		err = pullImage(argumentsAfter(os.Args[1:], commandPull))
 	case commandExec:
 		var status int
 		status, err = execCommand(inv, argumentsAfter(os.Args[1:], commandExec))
