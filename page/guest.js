@@ -45,6 +45,9 @@ const EXECUTABLE = 0o755;
 // The image's root, as the guest names it.
 const ROOT = "/";
 
+// How long an answer about a volume's attributes is kept (volumeFs).
+const VOLUME_KEEP_MS = 1000;
+
 // The image's lookups wait on the supervisor's disk, never on a network,
 // so the SDK's request timeout is off: a slow disk is not an error.
 const NO_TIMEOUT = 0;
@@ -256,8 +259,23 @@ function imageFs() {
 
 // A volume as a file system of the guest: a directory of the host that
 // the container reads and writes. Unlike the image it changes, under
-// the container's hands and under the host's, so nothing here is kept:
-// every question goes to the supervisor, and every change too.
+// the container's hands and under the host's, so an answer is kept only
+// briefly: every change goes to the supervisor, and every question too,
+// unless the same question was answered less than VOLUME_KEEP_MS ago.
+//
+// The guest's kernel asks for a file's attributes several times for one
+// use of it: once as it walks to the name, again when it opens it, and
+// once more for the program's stat. And a program that lists a
+// directory then asks about each name in it, as find, a compiler or a
+// module resolver does. A listing carries each entry's attributes, so
+// those answers are kept from the listing, and the questions that
+// follow cost nothing.
+//
+// A change the guest makes forgets everything kept, so the guest always
+// sees its own changes at once. A change the host makes shows within
+// VOLUME_KEEP_MS here, and the guest's kernel keeps an answer for a
+// second more (its metatimeout), so within about two seconds in all.
+// Contents are never kept: each read is a request.
 function volumeFs(index) {
   const base = `${VOLUME_URL}${index}/`;
   const request = async (op, params, init) => {
@@ -269,9 +287,63 @@ function volumeFs(index) {
     throw new FsError(code);
   };
   const ask = (op, path, extra = {}) => request(op, { p: path, ...extra });
-  const change = (op, path, extra = {}, body = undefined) =>
-    request(op, { p: path, ...extra }, { method: "POST", body });
-  const attrOf = async (path) => (await ask("attr", path)).json();
+
+  // Attributes by path, each with when it was asked, as a promise so
+  // that questions arriving together share one request. A name that is
+  // not there is kept as that answer too, since a program looking for a
+  // file asks after many names that do not exist; any other error is
+  // forgotten, so the error is the guest's and not the cache's.
+  //
+  // Whatever is older than VOLUME_KEEP_MS is never used again, so the
+  // whole map is dropped once that long has passed since it was last
+  // emptied: a walk over a large tree keeps a second's worth of names,
+  // not every name it ever saw.
+  const kept = new Map();
+  let emptied = performance.now();
+  // Counts the changes, so that an answer asked for before a change and
+  // arriving after it is not kept (a listing is not in the map while it
+  // is in flight, as an attribute question is).
+  let changes = 0;
+  const forget = () => {
+    kept.clear();
+    emptied = performance.now();
+    changes += 1;
+  };
+  const keep = (path, answer) => {
+    if (performance.now() - emptied > VOLUME_KEEP_MS) {
+      kept.clear();
+      emptied = performance.now();
+    }
+    const entry = { at: performance.now(), answer };
+    kept.set(path, entry);
+    answer.catch((error) => {
+      if (error?.code !== "ENOENT" && kept.get(path) === entry) {
+        kept.delete(path);
+      }
+    });
+    return answer;
+  };
+  const attrOf = (path) => {
+    const entry = kept.get(path);
+    if (entry !== undefined && performance.now() - entry.at < VOLUME_KEEP_MS) {
+      return entry.answer;
+    }
+    return keep(
+      path,
+      ask("attr", path).then((response) => response.json()),
+    );
+  };
+
+  // A change forgets everything, before it is sent and again once it is
+  // done, so no answer from before or during the change survives it.
+  const change = async (op, path, extra = {}, body = undefined) => {
+    forget();
+    try {
+      return await request(op, { p: path, ...extra }, { method: "POST", body });
+    } finally {
+      forget();
+    }
+  };
   const octal = (mode) => mode.toString(8);
 
   // An open file, by path: reads and writes each name their range.
@@ -286,8 +358,17 @@ function volumeFs(index) {
 
   return {
     getattr: attrOf,
-    readdir: async (path) =>
-      (await (await ask("dir", path)).json()).map(({ name, type, ino }) => ({ name, type, ino })),
+    readdir: async (path) => {
+      const before = changes;
+      const list = await (await ask("dir", path)).json();
+      const parent = path === ROOT ? "" : path;
+      for (const { name, attr } of list) {
+        if (changes === before) {
+          keep(`${parent}/${name}`, Promise.resolve(attr));
+        }
+      }
+      return list.map(({ name, type, ino }) => ({ name, type, ino }));
+    },
     readlink: async (path) => (await (await ask("link", path)).json()).target,
     open: async (path, flags) => {
       await attrOf(path);
