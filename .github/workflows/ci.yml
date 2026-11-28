@@ -78,12 +78,18 @@ jobs:
       - name: Unpack the archive
         run: Expand-Archive tabc-windows-amd64.zip -DestinationPath .
 
-      # The image comes from a registry that does not count pulls
-      # against the address a shared machine pulls from.
+      # A registry counts pulls against the address they come from,
+      # and this machine shares its address with many others, so any
+      # one registry may refuse. The image is pulled once, from the
+      # first registry that answers, and every container after that
+      # runs from tabc's cache.
       - name: Containers in the machine's Chrome
         shell: pwsh
         env:
-          IMAGE: public.ecr.aws/docker/library/alpine:3
+          IMAGES: >-
+            mirror.gcr.io/library/alpine:3
+            alpine:3
+            public.ecr.aws/docker/library/alpine:3
         run: |
           $tabc = Join-Path $PWD 'tabc-windows-amd64\tabc.exe'
 
@@ -97,14 +103,28 @@ jobs:
           & $tabc --version
           Check 'the version command' $LASTEXITCODE 0
 
-          $out = & $tabc run $env:IMAGE echo hi
+          $image = $null
+          foreach ($candidate in $env:IMAGES -split ' ') {
+            & $tabc pull $candidate
+            if ($LASTEXITCODE -eq 0) {
+              $image = $candidate
+              break
+            }
+            Write-Host "could not pull $candidate; trying the next registry"
+          }
+          if (-not $image) {
+            throw 'no registry gave the image'
+          }
+          Write-Host "ok: pulled $image"
+
+          $out = & $tabc run $image echo hi
           Check 'output' $out 'hi'
           Check 'the status of a program that succeeds' $LASTEXITCODE 0
 
-          & $tabc run $env:IMAGE sh -c 'exit 7'
+          & $tabc run $image sh -c 'exit 7'
           Check 'exit status' $LASTEXITCODE 7
 
-          $out = 'from the host' | & $tabc run -i $env:IMAGE cat
+          $out = 'from the host' | & $tabc run -i $image cat
           Check 'input, to its end' $out 'from the host'
 
           # A volume: a directory of this machine, named with a drive
@@ -112,6 +132,6 @@ jobs:
           New-Item -ItemType Directory volume | Out-Null
           Set-Content -NoNewline -Path volume\given -Value 'from the host'
           $script = 'cat /data/given && echo && echo from the guest > /data/made && mkdir /data/sub && mv /data/made /data/sub/moved && ls /data/sub'
-          $out = & $tabc run -v "$PWD\volume:/data" $env:IMAGE sh -c $script
+          $out = & $tabc run -v "$PWD\volume:/data" $image sh -c $script
           Check 'a volume, read and changed in the guest' ($out -join ',') 'from the host,moved'
           Check 'a volume, as the host sees it afterwards' (Get-Content volume\sub\moved) 'from the guest'
