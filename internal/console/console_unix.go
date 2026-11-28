@@ -1,0 +1,49 @@
+//go:build !windows
+
+package console
+
+import (
+	"fmt"
+	"net"
+	"os"
+
+	"golang.org/x/sys/unix"
+)
+
+// socketNetwork is the kind of socket an engine's console socket is.
+const socketNetwork = "unix"
+
+// Size returns the terminal's size in character cells, as the engine
+// last set it on the controlling end.
+func Size(terminal *os.File) (cols, rows int, err error) {
+	size, err := unix.IoctlGetWinsize(int(terminal.Fd()), unix.TIOCGWINSZ)
+	if err != nil {
+		return 0, 0, err
+	}
+	return int(size.Col), int(size.Row), nil
+}
+
+// Send passes the pty's controlling end to the engine over the socket
+// at path, as the runtime specification's console socket works: one
+// message carrying the file descriptor.
+func Send(path string, controller *os.File) error {
+	connection, err := net.Dial(socketNetwork, path)
+	if err != nil {
+		return fmt.Errorf("connecting to the console socket: %w", err)
+	}
+	defer connection.Close()
+
+	socket, ok := connection.(*net.UnixConn)
+	if !ok {
+		return fmt.Errorf("the console socket %s is not a unix socket", path)
+	}
+
+	// The message's bytes are the descriptor's name, by convention; the
+	// descriptor itself rides in the control message.
+	name := []byte(controller.Name())
+	rights := unix.UnixRights(int(controller.Fd()))
+	if _, _, err := socket.WriteMsgUnix(name, rights, nil); err != nil {
+		return fmt.Errorf("sending the terminal to the engine: %w", err)
+	}
+	return nil
+}

@@ -57,7 +57,7 @@ func TestDirTreeChanges(t *testing.T) {
 	must(tree.SetAttr("/notes", SetAttr{Size: &size, Mode: &mode}))
 	attr, err := tree.Attr("/notes")
 	must(err)
-	if attr.Size != 5 || attr.Mode != 0o600 || onHost("notes") != "hello" {
+	if attr.Size != 5 || attr.Mode != shownMode(mode) || onHost("notes") != "hello" {
 		t.Errorf("after the change: %+v, %q", attr, onHost("notes"))
 	}
 

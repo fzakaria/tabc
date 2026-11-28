@@ -216,7 +216,7 @@ func (b *Bundle) boundFiles() map[string]string {
 		if err != nil {
 			continue
 		}
-		files[filepath.Clean(mount.Destination)] = string(content)
+		files[plan.GuestPath(mount.Destination)] = string(content)
 	}
 
 	return files
@@ -258,7 +258,7 @@ func (b *Bundle) NetworkNamespace() (path string, wanted bool) {
 // the supervisor makes the guest's lookups.
 func (b *Bundle) ResolvConfPath() string {
 	for _, mount := range b.Spec.Mounts {
-		if isBind(mount) && filepath.Clean(mount.Destination) == resolvPath {
+		if isBind(mount) && plan.GuestPath(mount.Destination) == resolvPath {
 			return mount.Source
 		}
 	}
@@ -309,7 +309,7 @@ func (b *Bundle) Volumes() []plan.Volume {
 		}
 		volumes = append(volumes, plan.Volume{
 			Source:   mount.Source,
-			Target:   filepath.Clean(mount.Destination),
+			Target:   plan.GuestPath(mount.Destination),
 			ReadOnly: readOnly,
 		})
 	}

@@ -23,7 +23,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"syscall"
 )
 
 // dirName is the registry's directory under the runtime's root. The dot
@@ -153,12 +152,12 @@ func lock(dir string) (func(), error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := syscall.Flock(int(file.Fd()), syscall.LOCK_EX); err != nil {
+	if err := lockFile(file); err != nil {
 		file.Close()
 		return nil, err
 	}
 	return func() {
-		syscall.Flock(int(file.Fd()), syscall.LOCK_UN)
+		unlockFile(file)
 		file.Close()
 	}, nil
 }

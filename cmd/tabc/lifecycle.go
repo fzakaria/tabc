@@ -19,6 +19,7 @@ import (
 
 	"github.com/fzakaria/tabc/internal/bundle"
 	"github.com/fzakaria/tabc/internal/cli"
+	"github.com/fzakaria/tabc/internal/proc"
 	"github.com/fzakaria/tabc/internal/runner"
 	"github.com/fzakaria/tabc/internal/signals"
 	"github.com/fzakaria/tabc/internal/state"
@@ -209,9 +210,17 @@ func supervise(inv cli.Invocation) int {
 		return supervisor.ExitFailed
 	}
 
+	// The pipe to the creator, which hears how the supervisor fares.
+	ready := proc.Handed()
+
+	// The browser this supervisor starts ends with the supervisor.
+	if err := proc.Contain(); err != nil {
+		return failSupervise(ready, fmt.Errorf("keeping the browser with the supervisor: %w", err))
+	}
+
 	files, err := share()
 	if err != nil {
-		return failSupervise(err)
+		return failSupervise(ready, err)
 	}
 	// A container shown in a browser somebody else brings needs none
 	// here, so a missing Chromium is only an error once it is wanted.
@@ -222,15 +231,15 @@ func supervise(inv cli.Invocation) int {
 		ID:            id,
 		ConsoleSocket: inv.ConsoleSocket,
 		MirrorPorts:   inv.MirrorPorts,
-		Ready:         os.NewFile(runner.ReadyDescriptor, "ready"),
+		Ready:         ready,
 		Share:         files,
 		Chromium:      browser,
 	})
 }
 
-// failSupervise tells the creator why the supervisor cannot start.
-func failSupervise(err error) int {
-	ready := os.NewFile(runner.ReadyDescriptor, "ready")
+// failSupervise tells the creator, on the pipe to the creator, why the
+// supervisor cannot start.
+func failSupervise(ready *os.File, err error) int {
 	fmt.Fprintln(ready, err.Error())
 	ready.Close()
 	return supervisor.ExitFailed
@@ -286,9 +295,9 @@ func remove(inv cli.Invocation) error {
 			return fmt.Errorf("container %q is %s; stop it first, or use --force", id, record.Status)
 		}
 
-		// The supervisor leads a session of its own, so its process
-		// group is the supervisor and the browser it started.
-		syscall.Kill(-record.Pid, syscall.SIGKILL)
+		// The supervisor leads a group of its own: the supervisor and
+		// the browser it started.
+		proc.KillGroup(record.Pid)
 	}
 
 	// A container is stopped as soon as its program ends, while its

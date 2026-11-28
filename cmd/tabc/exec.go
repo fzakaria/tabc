@@ -20,6 +20,7 @@ import (
 
 	"github.com/fzakaria/tabc/internal/cli"
 	"github.com/fzakaria/tabc/internal/console"
+	"github.com/fzakaria/tabc/internal/proc"
 	"github.com/fzakaria/tabc/internal/runner"
 	"github.com/fzakaria/tabc/internal/signals"
 	"github.com/fzakaria/tabc/internal/state"
@@ -257,7 +258,7 @@ func execCommand(inv cli.Invocation, args []string) (int, error) {
 
 	var ready *os.File
 	if isChild {
-		ready = os.NewFile(runner.ReadyDescriptor, "ready")
+		ready = proc.Handed()
 	}
 	if options.pidFile != "" && !isChild {
 		pid := strconv.Itoa(os.Getpid())
@@ -291,8 +292,11 @@ func detachExec(options execOptions) error {
 	if options.consoleSocket == "" {
 		child.Stdin, child.Stdout, child.Stderr = os.Stdin, os.Stdout, os.Stderr
 	}
-	child.ExtraFiles = []*os.File{readyWrite}
-	child.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+	proc.Lead(child, proc.KeepTerminal)
+	if err := proc.Hand(child, readyWrite); err != nil {
+		readyWrite.Close()
+		return err
+	}
 	err = child.Start()
 	readyWrite.Close()
 	if err != nil {
@@ -378,7 +382,8 @@ func attachExec(socket string, options execOptions, ready *os.File) (int, error)
 			return fail(err)
 		}
 		defer term.Restore(stdin, saved)
-		sizeOf = func() (int, int, error) { return term.GetSize(stdin) }
+		defer actOnEscapes()()
+		sizeOf = terminalSize
 	}
 	if sizeOf != nil {
 		request.Cols, request.Rows, _ = sizeOf()

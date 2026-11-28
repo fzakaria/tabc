@@ -211,6 +211,7 @@ func fail(w http.ResponseWriter, status int, code string) {
 // would leave the root reads as not found: to the guest nothing is
 // there.
 func failWith(w http.ResponseWriter, err error) {
+	err = hostError(err)
 	switch {
 	case errors.Is(err, fs.ErrNotExist), errors.Is(err, syscall.ELOOP):
 		fail(w, http.StatusNotFound, codeNotFound)

@@ -6,8 +6,8 @@ import (
 	"io/fs"
 	"os"
 	"path"
+	"path/filepath"
 	"strings"
-	"syscall"
 )
 
 // DirTree is a root file system in a directory on the host: what a
@@ -33,12 +33,15 @@ func (t *DirTree) Close() error {
 	return t.root.Close()
 }
 
+// rootName is the root's own path as os.Root takes paths.
+const rootName = "."
+
 // relative turns the absolute path the guest uses into the path os.Root
-// takes, which is relative to the root: "/" is ".".
+// takes, which is relative to the root: "/" is rootName.
 func relative(path string) string {
 	path = strings.Trim(path, "/")
 	if path == "" {
-		return "."
+		return rootName
 	}
 	return path
 }
@@ -46,7 +49,8 @@ func relative(path string) string {
 // Attr returns a path's attributes. A file of a kind the guest cannot
 // be shown reads as not there.
 func (t *DirTree) Attr(path string) (Attr, error) {
-	info, err := t.root.Lstat(relative(path))
+	name := relative(path)
+	info, err := t.root.Lstat(name)
 	if err != nil {
 		return Attr{}, err
 	}
@@ -54,6 +58,7 @@ func (t *DirTree) Attr(path string) (Attr, error) {
 	if !known {
 		return Attr{}, fs.ErrNotExist
 	}
+	t.identify(&attr, name, nil)
 	return attr, nil
 }
 
@@ -83,25 +88,31 @@ func (t *DirTree) Dir(name string) ([]Entry, error) {
 		if !known {
 			continue
 		}
+		itemName := path.Join(relative(name), item.Name())
+		t.identify(&attr, itemName, directory)
+
 		entry := Entry{Name: item.Name(), Type: attr.Type, Ino: attr.Ino, Attr: attr}
 		if attr.Type == TypeSymlink {
-			entry.Target, _ = t.root.Readlink(path.Join(relative(name), item.Name()))
+			entry.Target, _ = t.Link(itemName)
 		}
 		entries = append(entries, entry)
 	}
 	return entries, nil
 }
 
-// Link returns a symbolic link's target.
+// Link returns a symbolic link's target, with the guest's separator: a
+// link read on Windows has Windows's, and ToSlash changes nothing
+// anywhere else.
 func (t *DirTree) Link(path string) (string, error) {
-	return t.root.Readlink(relative(path))
+	target, err := t.root.Readlink(relative(path))
+	return filepath.ToSlash(target), err
 }
 
 // Read returns a range of a regular file's bytes.
 func (t *DirTree) Read(path string, offset, length int64) ([]byte, error) {
 	// O_NOFOLLOW: the guest opens only what its own lookup found to be a
 	// regular file, so a link here is a file replaced under the guest.
-	file, err := t.root.OpenFile(relative(path), os.O_RDONLY|syscall.O_NOFOLLOW, 0)
+	file, err := t.root.OpenFile(relative(path), os.O_RDONLY|noFollow, 0)
 	if err != nil {
 		return nil, err
 	}
@@ -136,15 +147,8 @@ func attrOf(info fs.FileInfo) (Attr, bool) {
 		MtimeMs: info.ModTime().UnixMilli(),
 	}
 
-	// The owner, link count, inode and the mode's special bits are in
-	// the raw stat result only. The fields' widths differ between
-	// systems, hence the conversions.
-	if stat, ok := info.Sys().(*syscall.Stat_t); ok {
-		attr.Mode = uint32(stat.Mode) & permissionBits
-		attr.UID = stat.Uid
-		attr.GID = stat.Gid
-		attr.Nlink = uint64(stat.Nlink)
-		attr.Ino = uint64(stat.Ino)
-	}
+	// The mode, owner, link count and inode number are the host's to
+	// say, each host in its own way.
+	statAttr(&attr, info)
 	return attr, true
 }

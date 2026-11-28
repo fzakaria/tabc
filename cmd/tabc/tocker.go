@@ -6,9 +6,9 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"syscall"
 	"time"
 
+	"github.com/fzakaria/tabc/internal/proc"
 	"github.com/fzakaria/tabc/internal/runner"
 	"github.com/fzakaria/tabc/internal/state"
 	"github.com/fzakaria/tabc/internal/supervisor"
@@ -108,7 +108,7 @@ func tocker(args []string) error {
 		return err
 	}
 	environment := append(os.Environ(), envDockerHost+"=unix://"+record.Socket)
-	return syscall.Exec(docker, append([]string{dockerProgram}, args...), environment)
+	return proc.Become(docker, append([]string{dockerProgram}, args...), environment)
 }
 
 // dockerPath returns the docker program to become: the environment's,
@@ -159,7 +159,7 @@ func startDaemon(withDashboard bool) (daemonRecord, error) {
 	process.Env = append(os.Environ(), envDaemonChild+"=1")
 	process.Stdout = logFile
 	process.Stderr = logFile
-	process.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+	proc.Lead(process, proc.LeaveTerminal)
 	if err := process.Start(); err != nil {
 		return daemonRecord{}, err
 	}
@@ -182,7 +182,7 @@ func stopDaemon() error {
 	if !running {
 		return errors.New("no tabc daemon is running")
 	}
-	if err := syscall.Kill(record.Pid, syscall.SIGTERM); err != nil {
+	if err := proc.Stop(record.Pid); err != nil {
 		return err
 	}
 

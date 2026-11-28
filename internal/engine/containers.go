@@ -10,11 +10,11 @@ import (
 	"sort"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 
 	"github.com/fzakaria/tabc/internal/image"
 	"github.com/fzakaria/tabc/internal/plan"
+	"github.com/fzakaria/tabc/internal/proc"
 	"github.com/fzakaria/tabc/internal/rootfs"
 	"github.com/fzakaria/tabc/internal/runner"
 	"github.com/fzakaria/tabc/internal/signals"
@@ -518,12 +518,12 @@ func (e *Engine) planMounts(planned *plan.Plan, mounts []Mount) error {
 			if err != nil {
 				return err
 			}
-			planned.Spec.Files[filepath.Clean(mount.Target)] = string(content)
+			planned.Spec.Files[plan.GuestPath(mount.Target)] = string(content)
 			continue
 		}
 		planned.Volumes = append(planned.Volumes, plan.Volume{
 			Source:   source,
-			Target:   filepath.Clean(mount.Target),
+			Target:   plan.GuestPath(mount.Target),
 			ReadOnly: mount.ReadOnly,
 		})
 	}
@@ -582,9 +582,8 @@ func (e *Engine) Stop(reference string, timeout time.Duration) error {
 	}
 
 	// A guest that does not answer even that is ended from outside: the
-	// supervisor leads a session whose process group is it and its
-	// browser.
-	syscall.Kill(-state.Pid, syscall.SIGKILL)
+	// supervisor leads a group that is the supervisor and its browser.
+	proc.KillGroup(state.Pid)
 	<-done
 	return nil
 }

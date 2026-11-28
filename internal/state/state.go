@@ -12,8 +12,9 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
-	"syscall"
 	"time"
+
+	"github.com/fzakaria/tabc/internal/proc"
 )
 
 // Status is where a container is in its life, in the words of the OCI
@@ -40,16 +41,9 @@ const (
 	LogFile = "supervisor.log"
 )
 
-// defaultRoot is the root for the superuser, and rootDirName the
-// directory under the user's runtime directory for anyone else.
-const (
-	systemRunDir = "/run"
-	defaultRoot  = systemRunDir + "/tabc"
-	rootDirName  = "tabc"
-)
-
-// accessWrite asks access(2) whether a path may be written (W_OK).
-const accessWrite = 2
+// rootDirName is the directory state is kept in, under whichever
+// directory the system keeps a user's short-lived files in.
+const rootDirName = "tabc"
 
 // The permissions of a container's directory and of its state file.
 const (
@@ -84,23 +78,12 @@ type Container struct {
 }
 
 // Root returns the directory state is kept under: the one given, else
-// /run/tabc for the superuser and a directory under XDG_RUNTIME_DIR, or
-// the temporary directory, for anyone else.
-//
-// A rootless engine runs the runtime as the superuser of a user
-// namespace, who cannot write to /run. That superuser is anyone else:
-// what decides is whether /run can be written, not the user's number.
+// the one the system has for the user (ownRoot).
 func Root(given string) string {
 	if given != "" {
 		return given
 	}
-	if os.Geteuid() == 0 && syscall.Access(systemRunDir, accessWrite) == nil {
-		return defaultRoot
-	}
-	if runtimeDir := os.Getenv("XDG_RUNTIME_DIR"); runtimeDir != "" {
-		return filepath.Join(runtimeDir, rootDirName)
-	}
-	return filepath.Join(os.TempDir(), fmt.Sprintf("%s-%d", rootDirName, os.Geteuid()))
+	return ownRoot()
 }
 
 // Dir returns a container's directory under root.
@@ -160,7 +143,7 @@ func Load(root, id string) (Container, error) {
 		return c, fmt.Errorf("container %q: %w", id, err)
 	}
 
-	if c.Status != Stopped && !alive(c.Pid) {
+	if c.Status != Stopped && !proc.Alive(c.Pid) {
 		c.Status = Stopped
 	}
 	return c, nil
@@ -184,18 +167,7 @@ func Remove(root, id string) error {
 // container reads as stopped from the moment its program ends, and the
 // supervisor is a little longer in going: it stops the browser first.
 func Alive(c Container) bool {
-	return alive(c.Pid)
-}
-
-// alive reports whether a process exists. Signal 0 checks for the
-// process without sending anything; EPERM means the process exists and
-// belongs to someone else.
-func alive(pid int) bool {
-	if pid <= 0 {
-		return false
-	}
-	err := syscall.Kill(pid, 0)
-	return err == nil || errors.Is(err, syscall.EPERM)
+	return proc.Alive(c.Pid)
 }
 
 // List returns every container under root, oldest first. A root that

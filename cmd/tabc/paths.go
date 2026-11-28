@@ -21,16 +21,6 @@ const (
 	envChromium = "TABC_CHROMIUM"
 )
 
-// browserNames are the names Chromium goes by on a PATH, and
-// browserPaths where a Mac keeps the application, which is on no PATH.
-var (
-	browserNames = []string{"chromium", "chromium-browser", "google-chrome-stable", "google-chrome"}
-	browserPaths = []string{
-		"/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
-		"/Applications/Chromium.app/Contents/MacOS/Chromium",
-	}
-)
-
 // share returns the page, the SDK and the guest's init: the directory
 // the environment names, else the files built into the binary.
 func share() (fs.FS, error) {
@@ -44,7 +34,9 @@ func share() (fs.FS, error) {
 }
 
 // chromiumPath returns the browser to run: the environment's, the
-// built-in one, or the first on the PATH.
+// built-in one, the first on the PATH, or the first found where the
+// system keeps a browser that is on no PATH (browserNames,
+// browserPaths).
 func chromiumPath() (string, error) {
 	if path := os.Getenv(envChromium); path != "" {
 		return path, nil
@@ -57,7 +49,7 @@ func chromiumPath() (string, error) {
 			return path, nil
 		}
 	}
-	for _, path := range browserPaths {
+	for _, path := range browserPaths() {
 		if _, err := os.Stat(path); err == nil {
 			return path, nil
 		}

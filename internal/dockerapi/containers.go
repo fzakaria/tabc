@@ -160,7 +160,7 @@ func (request createRequest) spec(name string) (engine.Spec, error) {
 
 	// The mounts, in both of the forms clients send them.
 	for _, bind := range request.HostConfig.Binds {
-		parts := strings.Split(bind, ":")
+		parts := plan.SplitMount(bind)
 		if len(parts) < 2 {
 			return spec, fmt.Errorf("bind %q is not source:target", bind)
 		}

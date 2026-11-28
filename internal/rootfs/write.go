@@ -2,7 +2,6 @@ package rootfs
 
 import (
 	"encoding/json"
-	"errors"
 	"io"
 	"net/http"
 	"os"
@@ -60,7 +59,7 @@ type SetAttr struct {
 
 // Create makes an empty regular file, and fails if the name is taken.
 func (t *DirTree) Create(path string, mode uint32) error {
-	file, err := t.root.OpenFile(relative(path), os.O_CREATE|os.O_EXCL|os.O_WRONLY, os.FileMode(mode&permissionBits))
+	file, err := t.root.OpenFile(relative(path), os.O_CREATE|os.O_EXCL|os.O_WRONLY, createMode(mode))
 	if err != nil {
 		return err
 	}
@@ -70,7 +69,7 @@ func (t *DirTree) Create(path string, mode uint32) error {
 // Write writes data into a regular file at offset and returns how much
 // was written.
 func (t *DirTree) Write(path string, offset int64, data []byte) (int, error) {
-	file, err := t.root.OpenFile(relative(path), os.O_WRONLY|syscall.O_NOFOLLOW, 0)
+	file, err := t.root.OpenFile(relative(path), os.O_WRONLY|noFollow, 0)
 	if err != nil {
 		return 0, err
 	}
@@ -130,14 +129,13 @@ func (t *DirTree) Symlink(path, target string) error {
 	return t.root.Symlink(target, relative(path))
 }
 
-// SetAttr changes a path's attributes. A change of owner that the
-// supervisor's user may not make is let go: a container's root is not
-// the host's, and a volume's files stay whoever's they are.
+// SetAttr changes a path's attributes. What a change of mode or of
+// owner does is the host's to say (chmod, chown).
 func (t *DirTree) SetAttr(path string, change SetAttr) error {
 	name := relative(path)
 
 	if change.Size != nil {
-		file, err := t.root.OpenFile(name, os.O_WRONLY|syscall.O_NOFOLLOW, 0)
+		file, err := t.root.OpenFile(name, os.O_WRONLY|noFollow, 0)
 		if err != nil {
 			return err
 		}
@@ -148,7 +146,7 @@ func (t *DirTree) SetAttr(path string, change SetAttr) error {
 		}
 	}
 	if change.Mode != nil {
-		if err := t.root.Chmod(name, os.FileMode(*change.Mode&permissionBits)); err != nil {
+		if err := t.chmod(name, *change.Mode); err != nil {
 			return err
 		}
 	}
@@ -160,7 +158,7 @@ func (t *DirTree) SetAttr(path string, change SetAttr) error {
 		if change.GID != nil {
 			gid = int(*change.GID)
 		}
-		if err := t.root.Lchown(name, uid, gid); err != nil && !errors.Is(err, os.ErrPermission) {
+		if err := t.chown(name, uid, gid); err != nil {
 			return err
 		}
 	}

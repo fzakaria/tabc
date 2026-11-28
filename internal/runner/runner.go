@@ -13,10 +13,10 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
-	"syscall"
 
 	"github.com/fzakaria/tabc/internal/cli"
 	"github.com/fzakaria/tabc/internal/plan"
+	"github.com/fzakaria/tabc/internal/proc"
 	"github.com/fzakaria/tabc/internal/state"
 	"github.com/fzakaria/tabc/internal/supervisor"
 )
@@ -24,10 +24,6 @@ import (
 // CommandSupervise is the command the tabc binary runs a supervisor
 // under.
 const CommandSupervise = "supervise"
-
-// ReadyDescriptor is where a supervisor finds the pipe to its creator:
-// the first descriptor after stdin, stdout and stderr.
-const ReadyDescriptor = 3
 
 // logTailLines is how much of a supervisor's log a failed create
 // repeats.
@@ -137,8 +133,9 @@ func startSupervisor(l Launch, record *state.Container) (*exec.Cmd, error) {
 
 	// The supervisor's stdin, stdout and stderr are the program's:
 	// this command's own, which an engine made the container's. A
-	// session of its own keeps the supervisor apart from the caller's
-	// terminal and process group.
+	// group of its own keeps the supervisor apart from the caller's
+	// process group and from the interrupt key of the caller's
+	// terminal.
 	process := exec.Command(self, args...)
 	process.Stdin = orFile(l.Stdin, os.Stdin)
 	process.Stdout = orFile(l.Stdout, os.Stdout)
@@ -153,8 +150,11 @@ func startSupervisor(l Launch, record *state.Container) (*exec.Cmd, error) {
 	if l.ConsoleSocket != "" {
 		process.Stdin, process.Stdout, process.Stderr = nil, nil, nil
 	}
-	process.ExtraFiles = []*os.File{readyWrite}
-	process.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+	proc.Lead(process, proc.KeepTerminal)
+	if err := proc.Hand(process, readyWrite); err != nil {
+		readyWrite.Close()
+		return nil, fmt.Errorf("handing the supervisor its pipe: %w", err)
+	}
 
 	err = l.Start(process)
 	readyWrite.Close()

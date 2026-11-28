@@ -232,6 +232,50 @@ asked is the program's process on the host. An engine passes
 in the pid file, so the engine has a process to wait on. A command
 that goes away takes its program with it.
 
+## Windows
+
+tabc on Windows is the same program, with what Windows does another
+way kept in files named `_windows.go`.
+
+### A container's processes
+
+Linux and macOS keep a supervisor and its browser together as a
+session, and a signal to the session's process group ends both.
+Windows has neither sessions nor signals. The supervisor puts itself
+in a job that ends when the supervisor does, so Windows ends the
+browser with it, however the supervisor went. Ending a container from
+outside is ending the supervisor's process. A browser opened for
+`--open` is the user's and is started outside the job.
+
+### The pipe to the creator
+
+A supervisor tells its creator how it fared on a pipe, which elsewhere
+is the descriptor after stderr. Windows hands a new process no
+numbered descriptors, so the pipe's handle is inherited and its number
+travels in the environment.
+
+### Volumes on Windows
+
+A Windows file has no owner numbers and no permission bits. A volume's
+files read as root's with mode 755, or 555 for a file marked
+read-only, and a change of mode or owner succeeds and changes nothing.
+Docker shows a Windows directory mounted in a Linux container the same
+way. A file's inode number and link count are its index and link count
+on the Windows volume. Three things a Linux program may trip on: two
+names that differ only by case are one file; a name with a character
+Windows refuses, such as `:` or `?`, cannot be made; and making a
+symbolic link takes Developer Mode or an administrator, and fails with
+EPERM otherwise.
+
+### tocker on Windows
+
+As on a Mac there is no engine for tabc to be a runtime of, so tabc is
+`tabc run` and `tocker`. A release cannot carry tabc under a second
+name, so `tocker.cmd` runs `tabc tocker`. Windows cannot replace a
+process's program, so tocker stays until `docker` ends, and `tocker
+--stop` ends the daemon's process, whose job takes the containers with
+it.
+
 ## What is missing
 
 UDP, a CPU limit that throttles, checkpointing, building images without Docker.

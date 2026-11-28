@@ -18,6 +18,7 @@ import (
 	"github.com/fzakaria/tabc/internal/engine"
 	"github.com/fzakaria/tabc/internal/image"
 	"github.com/fzakaria/tabc/internal/plan"
+	"github.com/fzakaria/tabc/internal/proc"
 	"github.com/fzakaria/tabc/internal/runner"
 	"github.com/fzakaria/tabc/internal/state"
 )
@@ -111,6 +112,12 @@ func daemon(args []string) error {
 	}
 	if _, running := readDaemon(); running {
 		return errors.New("a tabc daemon is already running")
+	}
+
+	// The supervisors this daemon starts end with the daemon, however
+	// the daemon ends.
+	if err := proc.Contain(); err != nil {
+		return err
 	}
 
 	root := state.Root("")

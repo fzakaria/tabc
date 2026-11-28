@@ -6,7 +6,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"syscall"
 )
 
 // unprivilegedID is the user and group Chromium runs as when the
@@ -99,9 +98,7 @@ func startBrowser(binary, profile, url string, extraFlags []string, log *os.File
 
 	// As the superuser, run the browser as nobody.
 	if os.Geteuid() == 0 {
-		browser.SysProcAttr = &syscall.SysProcAttr{
-			Credential: &syscall.Credential{Uid: unprivilegedID, Gid: unprivilegedID},
-		}
+		runAsNobody(browser)
 	}
 
 	if err := browser.Start(); err != nil {

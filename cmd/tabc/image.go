@@ -243,7 +243,7 @@ func parsePublish(text string) (plan.Publish, error) {
 // host's, and is made absolute, since the supervisor does not stand
 // where the user does.
 func parseVolume(text string) (plan.Volume, error) {
-	parts := strings.Split(text, ":")
+	parts := plan.SplitMount(text)
 	if len(parts) < 2 || len(parts) > 3 || parts[0] == "" || !strings.HasPrefix(parts[1], "/") {
 		return plan.Volume{}, fmt.Errorf("volume %q is not directory:/path[:ro]", text)
 	}
@@ -260,7 +260,7 @@ func parseVolume(text string) (plan.Volume, error) {
 	}
 	return plan.Volume{
 		Source:   source,
-		Target:   filepath.Clean(parts[1]),
+		Target:   plan.GuestPath(parts[1]),
 		ReadOnly: len(parts) == 3 && parts[2] == "ro",
 	}, nil
 }
@@ -367,13 +367,14 @@ func runImage(args []string) (int, error) {
 			return 0, errors.New("-t needs a terminal, and the input is not one")
 		}
 		planned.Terminal = plan.TerminalInherit
-		planned.Cols, planned.Rows, _ = term.GetSize(stdin)
+		planned.Cols, planned.Rows, _ = terminalSize()
 
 		saved, err := term.MakeRaw(stdin)
 		if err != nil {
 			return 0, err
 		}
 		defer term.Restore(stdin, saved)
+		defer actOnEscapes()()
 	}
 
 	// Without -i the program has no input, as with every engine.
