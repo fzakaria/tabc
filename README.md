@@ -32,7 +32,8 @@ $ docker run --rm --runtime tabc --platform linux/arm64 alpine uname -sm
 Linux aarch64
 ```
 
-tabc needs no Linux underneath, so it works on a Mac without a VM.
+tabc needs no Linux underneath, so it works on a Mac or on Windows
+without a VM.
 With `--open` the container runs in a tab of your own browser, and
 what you type in the tab or in the terminal shows in both:
 
@@ -60,12 +61,21 @@ $ nix run github:fzakaria/tabc -- run alpine echo hi
 hi
 ```
 
-Without Nix, each [release] has an archive for Linux and for a Mac,
-x86-64 and arm64:
+Without Nix, each [release] has an archive for Linux, for a Mac and
+for Windows, x86-64 and arm64:
 
 ```console
 $ curl -L https://github.com/fzakaria/tabc/releases/latest/download/tabc-linux-amd64.tar.gz | tar -xz
 $ ./tabc-linux-amd64/tabc run alpine echo hi
+hi
+```
+
+On Windows 10 or later, in PowerShell:
+
+```console
+> curl.exe -LO https://github.com/fzakaria/tabc/releases/latest/download/tabc-windows-amd64.zip
+> tar -xf tabc-windows-amd64.zip
+> .\tabc-windows-amd64\tabc.exe run alpine echo hi
 hi
 ```
 
@@ -74,8 +84,16 @@ A release's tabc uses the Chrome or Chromium you have installed, and
 
 tabc is one file, and `tocker` is the same file under another name. On
 Linux the Nix package brings its own Chromium. On a Mac tabc looks for
-Chrome in `/Applications`, or uses the one `TABC_CHROMIUM` points at.
-With `--open` the container runs in the browser you already have.
+Chrome in `/Applications`. On Windows tabc looks for Chrome, then
+Chromium, then Edge, where each installs itself, and `tocker` is a
+command file beside `tabc.exe`. `TABC_CHROMIUM` names another browser
+on any of them. With `--open` the container runs in the browser you
+already have.
+
+A volume on Windows (`-v C:\work:/work`) reads the way a Windows
+directory reads in a container under Docker: every file is root's,
+with one mode, and `chmod` changes nothing. [docs/design.md](docs/design.md#windows)
+has the rest.
 
 ## Use
 

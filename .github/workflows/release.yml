@@ -1,6 +1,7 @@
 # A release for someone without Nix: pushing a tag `v<version>` builds
-# tabc for Linux and for a Mac, x86-64 and arm64 each, and publishes the
-# four archives and their checksums as that tag's GitHub release.
+# tabc for Linux, for a Mac and for Windows, x86-64 and arm64 each, and
+# publishes the six archives and their checksums as that tag's GitHub
+# release.
 #
 #   packages.release — the archives, all cross-compiled here by Go
 #

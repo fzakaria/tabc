@@ -5,7 +5,8 @@
 #
 # `target` builds for another system than the one building, which Go
 # does with no toolchain but its own: `{ os = "darwin"; arch = "arm64"; }`
-# is a binary for a Mac, built on Linux.
+# is a binary for a Mac, built on Linux, and `os = "windows"` one for
+# Windows.
 {
   pkgs,
   share ? import ./share.nix { inherit pkgs; },
@@ -83,11 +84,28 @@ let
     };
     doCheck = false;
   });
+
+  # tocker on Windows, where a link under another name is not something
+  # an archive can carry: a command file beside tabc.exe that runs
+  # `tabc tocker`, which is tocker by its other spelling. The file is
+  # found by the directory it is in, and ends its lines the way the
+  # Windows shell reads them.
+  tockerCommand = pkgs.writeText "tocker.cmd" (
+    lib.concatMapStrings (line: line + "\r\n") [
+      "@echo off"
+      ''"%~dp0tabc.exe" tocker %*''
+    ]
+  );
 in
 if target == null then
   native
-else
+else if target.os == "windows" then
   # Go installs a cross-compiled binary under bin/<os>_<arch>/.
+  pkgs.runCommand "tabc-${target.os}-${target.arch}-${go.version}" { } ''
+    install -Dm755 "$(find ${cross}/bin -type f -name tabc.exe)" $out/bin/tabc.exe
+    install -Dm644 ${tockerCommand} $out/bin/tocker.cmd
+  ''
+else
   pkgs.runCommand "tabc-${target.os}-${target.arch}-${go.version}" { } ''
     install -Dm755 "$(find ${cross}/bin -type f -name tabc)" $out/bin/tabc
     ln -s tabc $out/bin/tocker
